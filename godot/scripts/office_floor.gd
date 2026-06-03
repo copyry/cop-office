@@ -31,10 +31,12 @@ func _ready() -> void:
 		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
 		DisplayServer.window_set_position(Vector2i.ZERO)
 		DisplayServer.window_set_size(DisplayServer.screen_get_size())
-		# Wallpaper rung: 30 fps, 0.66x render, no SSAO — wallpaper must be
-		# nearly free while the user works (perf doc rung 3-4).
+		# Wallpaper rung: 30 fps, 0.8x render with FSR upscale (bilinear at
+		# 0.66 read as jaggies) — wallpaper must stay nearly free.
 		Engine.max_fps = 30
-		get_viewport().scaling_3d_scale = 0.66
+		get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
+		get_viewport().scaling_3d_scale = 0.8
+		get_viewport().msaa_3d = Viewport.MSAA_2X  # 4x reserved for interact mode
 		var env: Environment = $WorldEnvironment.environment
 		env.ssao_enabled = false
 		# Volumetric froxel pipeline is the big GPU cost — at wallpaper rung

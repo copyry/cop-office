@@ -2,8 +2,8 @@ shader_type canvas_item;
 render_mode blend_mul;
 
 // Film grain + vignette composite pass — the final 5% that sells the HD-2D look.
-uniform float grain_amount : hint_range(0.0, 0.3) = 0.07;
-uniform float vignette_amount : hint_range(0.0, 1.0) = 0.32;
+uniform float grain_amount : hint_range(0.0, 0.3) = 0.05;
+uniform float vignette_amount : hint_range(0.0, 1.0) = 0.2;
 
 void fragment() {
 	float n = fract(sin(dot(FRAGCOORD.xy + vec2(TIME * 61.7, TIME * 83.3),
