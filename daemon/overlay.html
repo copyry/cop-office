@@ -233,13 +233,13 @@
     if (id === "ceo") return "Chairman";
     return ROLES[phash(id) % 6];
   }
-  // CSS sprite crops from the 256x512 sheet (cell 64): face (16,6,32,32),
-  // standing body (16,6,32,54).
+  // CSS sprite crops from the 256x512 sheet (cell 64): face (14,14,36,36)
+  // keeps the face centered with chin + shoulders; standing body (16,6,32,54).
   function face(el, id, size) {
-    const k = size / 32;
+    const k = size / 36;
     el.style.backgroundImage = `url(/char/npc${npcOf(id)}.png)`;
     el.style.backgroundSize = `${256 * k}px ${512 * k}px`;
-    el.style.backgroundPosition = `${-16 * k}px ${-6 * k}px`;
+    el.style.backgroundPosition = `${-14 * k}px ${-14 * k}px`;
     el.classList.add("px");
     el.textContent = "";
   }

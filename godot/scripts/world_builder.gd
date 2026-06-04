@@ -182,21 +182,25 @@ func _no_shadow(node: Node) -> void:
 var _tint_mat_cache := {}
 
 ## Multiplies a kit model's materials by a color (zone-keying plain floors).
-func _tint_meshes(node: Node, tint: Color) -> void:
+## rough >= 0 also polishes the surface so SSR can mirror lights/furniture.
+func _tint_meshes(node: Node, tint: Color, rough := -1.0) -> void:
 	if node is MeshInstance3D:
 		var mi: MeshInstance3D = node
 		if mi.mesh:
 			for i in mi.mesh.get_surface_count():
 				var src := mi.get_active_material(i)
 				if src is BaseMaterial3D:
-					var key := str(src.get_instance_id()) + tint.to_html()
+					var key := str(src.get_instance_id()) + tint.to_html() + str(rough)
 					if not _tint_mat_cache.has(key):
 						var dup: BaseMaterial3D = src.duplicate()
 						dup.albedo_color = tint
+						if rough >= 0.0:
+							dup.roughness = rough
+							dup.metallic = 0.12
 						_tint_mat_cache[key] = dup
 					mi.set_surface_override_material(i, _tint_mat_cache[key])
 	for c in node.get_children():
-		_tint_meshes(c, tint)
+		_tint_meshes(c, tint, rough)
 
 ## Kit floor: tile a zone with nx × nz pieces stretched to fit exactly.
 func _kit_floor(model: String, center: Vector3, w: float, d: float, nx: int, nz: int,
@@ -207,8 +211,8 @@ func _kit_floor(model: String, center: Vector3, w: float, d: float, nx: int, nz:
 			var pz := center.z + ((iz + 0.5) / nz - 0.5) * d
 			var tile := _kit_scaled(model, Vector3(px, 0, pz), 0.0,
 				Vector3(w / nx / 4.0, 1.0, d / nz / 4.0))
-			if tile and tint != Color.WHITE:
-				_tint_meshes(tile, tint)
+			if tile:
+				_tint_meshes(tile, tint, 0.3)  # polished: floors catch SSR
 
 ## Kit shell: perimeter walls (solid + full-glass windows), railing
 ## partitions on the original segment plan, zone carpet floors.

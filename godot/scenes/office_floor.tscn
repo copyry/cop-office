@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://scripts/office_floor.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/camera_rig.gd" id="2"]
@@ -9,12 +9,25 @@
 [ext_resource type="Script" path="res://scripts/hud.gd" id="7"]
 [ext_resource type="Shader" path="res://shaders/cinema_focus.gdshader" id="8"]
 
+[sub_resource type="ProceduralSkyMaterial" id="sky_proc"]
+sky_top_color = Color(0.3, 0.5, 0.85, 1)
+sky_horizon_color = Color(0.74, 0.82, 0.95, 1)
+ground_bottom_color = Color(0.1, 0.16, 0.09, 1)
+ground_horizon_color = Color(0.45, 0.56, 0.42, 1)
+
+[sub_resource type="Sky" id="sky_res"]
+sky_material = SubResource("sky_proc")
+
 [sub_resource type="Environment" id="env"]
 background_mode = 1
 background_color = Color(0.05, 0.07, 0.12, 1)
-ambient_light_source = 2
+sky = SubResource("sky_res")
+ambient_light_source = 3
 ambient_light_color = Color(0.82, 0.85, 0.95, 1)
 ambient_light_energy = 2.0
+reflected_light_source = 2
+ssr_enabled = true
+ssr_max_steps = 48
 tonemap_mode = 3
 tonemap_exposure = 1.25
 ssao_enabled = true

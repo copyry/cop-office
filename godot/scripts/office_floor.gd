@@ -1,4 +1,4 @@
-extends Node3D
+﻿extends Node3D
 ## Root controller for the office floor: real-time day cycle, screenshot
 ## automation (--shot) and wallpaper mode (--wallpaper).
 
@@ -33,14 +33,15 @@ func _ready() -> void:
 		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
 		DisplayServer.window_set_position(Vector2i.ZERO)
 		DisplayServer.window_set_size(DisplayServer.screen_get_size())
-		# Wallpaper rung: 30 fps, 0.8x render with FSR upscale (bilinear at
-		# 0.66 read as jaggies) — wallpaper must stay nearly free.
+		# Wallpaper rung: 30 fps, NATIVE render + MSAA 2x — the measured sweet
+		# spot (FSR upscale read as jaggies; 4x MSAA costs +10% GPU for little
+		# visible gain at wallpaper distance).
 		Engine.max_fps = 30
-		get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
-		get_viewport().scaling_3d_scale = 0.8
-		get_viewport().msaa_3d = Viewport.MSAA_2X  # 4x reserved for interact mode
+		get_viewport().scaling_3d_scale = 1.0
+		get_viewport().msaa_3d = Viewport.MSAA_2X
 		var env: Environment = $WorldEnvironment.environment
 		env.ssao_enabled = false
+		env.ssr_max_steps = 24
 		# Volumetric froxel pipeline is the big GPU cost — at wallpaper rung
 		# the fake beam cards carry the god-ray look on their own.
 		env.volumetric_fog_enabled = false
@@ -79,7 +80,15 @@ func _apply_daylight() -> void:
 	$Sun.rotation_degrees = Vector3(pitch, 150.0, 0.0)
 	$Sun.light_energy = energy
 	$Sun.light_color = sun_col
-	$WorldEnvironment.environment.ambient_light_energy = lerpf(a[5], b[5], f)
+	var env: Environment = $WorldEnvironment.environment
+	env.ambient_light_energy = lerpf(a[5], b[5], f)
+	# Procedural sky is the IBL source (ambient + reflections) — keep its
+	# colors on the clock so glossy floors mirror dawn/day/night correctly.
+	if env.sky and env.sky.sky_material is ProceduralSkyMaterial:
+		var sm: ProceduralSkyMaterial = env.sky.sky_material
+		sm.sky_top_color = sky_col.darkened(0.25)
+		sm.sky_horizon_color = sky_col.lightened(0.25)
+		sm.ground_horizon_color = sky_col * Color(0.75, 0.8, 0.7)
 	var world: Node3D = $World
 	if world.sky_mat:
 		world.sky_mat.emission = sky_col

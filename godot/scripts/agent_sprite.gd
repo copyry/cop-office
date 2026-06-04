@@ -114,7 +114,7 @@ func _portrait() -> Texture2D:
 	if _mode in ["npc", "custom"]:
 		var at := AtlasTexture.new()
 		at.atlas = texture
-		at.region = Rect2(16, 6, 32, 32)
+		at.region = Rect2(14, 14, 36, 36)  # face centered, chin + shoulders in
 		return at
 	return texture  # procedural mini figure
 
