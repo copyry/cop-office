@@ -10,6 +10,7 @@ use tao::{
     dpi::{LogicalPosition, LogicalSize},
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder},
+    platform::windows::WindowBuilderExtWindows,
     window::WindowBuilder,
 };
 use wry::WebViewBuilder;
@@ -51,12 +52,14 @@ fn main() {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
-    // ---- overlay window (web UI from the daemon)
+    // ---- overlay window (web UI from the daemon) — starts hidden: the app
+    // runs in the background and the launcher widget summons it.
     let overlay = WindowBuilder::new()
         .with_title("BagIdea Office")
         .with_inner_size(LogicalSize::new(560.0, 700.0))
         .with_position(LogicalPosition::new(1060.0, 96.0))
         .with_always_on_top(true)
+        .with_visible(false)
         .build(&event_loop)
         .expect("overlay window");
     let overlay_id = overlay.id();
@@ -74,6 +77,7 @@ fn main() {
         .with_transparent(true)
         .with_resizable(false)
         .with_always_on_top(true)
+        .with_skip_taskbar(true)
         .build(&event_loop)
         .expect("orb window");
     let orb_id = orb.id();
@@ -93,7 +97,14 @@ fn main() {
         .build(&orb)
         .expect("orb webview");
 
-    let mut overlay_visible = true;
+    // Among multiple TOPMOST windows, Windows orders by recency — re-assert
+    // the orb whenever the overlay comes forward so it can never be covered.
+    let raise_orb = |orb: &tao::window::Window| {
+        orb.set_always_on_top(false);
+        orb.set_always_on_top(true);
+    };
+
+    let mut overlay_visible = false;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -110,12 +121,22 @@ fn main() {
                     *control_flow = ControlFlow::Exit;
                 }
             }
+            Event::WindowEvent {
+                window_id,
+                event: WindowEvent::Focused(true),
+                ..
+            } => {
+                if window_id == overlay_id {
+                    raise_orb(&orb);
+                }
+            }
             Event::UserEvent(ue) => match ue {
                 UserEvent::Toggle => {
                     overlay_visible = !overlay_visible;
                     overlay.set_visible(overlay_visible);
                     if overlay_visible {
                         overlay.set_focus();
+                        raise_orb(&orb);
                     }
                 }
                 UserEvent::Drag => {
