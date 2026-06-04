@@ -301,40 +301,61 @@ func _build_sky_life() -> void:
 	cmat.albedo_color = Color(1.0, 1.0, 1.0, 0.75)
 	cmat.roughness = 1.0
 	cmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	var vmat := StandardMaterial3D.new()
-	vmat.albedo_color = Color(1.0, 1.0, 1.0, 0.3)  # overhead veil: barely-there
-	vmat.roughness = 1.0
-	vmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	for i in 6:
-		var overhead := i < 3
+	for i in 3:
 		var cloud := Node3D.new()
 		add_child(cloud)
 		for b in randi_range(3, 5):
 			var puff := MeshInstance3D.new()
 			var sm := SphereMesh.new()
-			var r := randf_range(1.1, 2.4) * (3.8 if overhead else 1.0)
+			var r := randf_range(1.1, 2.4)
 			sm.radius = r
 			sm.height = r
 			sm.radial_segments = 16
 			sm.rings = 8
 			puff.mesh = sm
-			puff.material_override = vmat if overhead else cmat
+			puff.material_override = cmat
 			puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			puff.layers = 2  # sky life stays off the static map render
 			puff.scale = Vector3(1.7, 0.45, 1.0)
 			puff.position = Vector3(b * randf_range(1.2, 1.9) - 3.0,
-				randf_range(-0.3, 0.4), randf_range(-0.7, 0.7)) * (3.2 if overhead else 1.0)
+				randf_range(-0.3, 0.4), randf_range(-0.7, 0.7))
 			cloud.add_child(puff)
-		if overhead:
-			# High above the office, far below the camera (~41m) — a soft
-			# white veil gliding across the scene.
-			cloud.position = Vector3(randf_range(-60.0, 60.0),
-				randf_range(24.0, 30.0), randf_range(-9.0, 7.0))
-		else:
-			# Behind the building (z < -14): the horizon layer.
-			cloud.position = Vector3(randf_range(-52.0, 52.0),
-				randf_range(15.0, 22.0), randf_range(-34.0, -14.0))
-		_drift_cloud(cloud, 66.0 if overhead else 56.0)
+		# Behind the building (z < -14): the horizon layer.
+		cloud.position = Vector3(randf_range(-52.0, 52.0),
+			randf_range(15.0, 22.0), randf_range(-34.0, -14.0))
+		_drift_cloud(cloud, 56.0)
+
+	# Veil layer: parented to the CAMERA, drifting across its local X — the
+	# only placement a -45° top-down camera is guaranteed to actually see.
+	# At 26m in front of a 28° lens the visible half-width is ~10.5m.
+	var cam := get_node_or_null("../CameraRig/Camera3D")
+	if cam:
+		var vmat := StandardMaterial3D.new()
+		vmat.albedo_color = Color(1.0, 1.0, 1.0, 0.26)  # barely-there veil
+		vmat.roughness = 1.0
+		vmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		for i in 3:
+			var veil := Node3D.new()
+			cam.add_child(veil)
+			for b in randi_range(3, 5):
+				var puff := MeshInstance3D.new()
+				var sm := SphereMesh.new()
+				var r := randf_range(1.6, 3.0)
+				sm.radius = r
+				sm.height = r
+				sm.radial_segments = 16
+				sm.rings = 8
+				puff.mesh = sm
+				puff.material_override = vmat
+				puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				puff.layers = 2
+				puff.scale = Vector3(1.8, 0.5, 1.0)
+				puff.position = Vector3(b * randf_range(1.6, 2.4) - 4.0,
+					randf_range(-0.5, 0.5), randf_range(-1.0, 1.0))
+				veil.add_child(puff)
+			veil.position = Vector3(randf_range(-34.0, 34.0),
+				randf_range(2.0, 7.5), -26.0)
+			_drift_cloud(veil, 36.0)
 
 func _drift_cloud(cloud: Node3D, span: float) -> void:
 	while is_instance_valid(cloud) and is_inside_tree():
