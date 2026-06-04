@@ -25,3 +25,6 @@ _assets_tmp/
 *.rar
 *.7z
 godot/assets/env/
+
+_shots/
+shots/
