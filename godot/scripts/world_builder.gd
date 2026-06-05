@@ -336,10 +336,117 @@ func _kit_architecture() -> void:
 func _ready() -> void:
 	_build_graph()
 	_build_geometry()
+	_build_ghost_deck()
 	_build_sky_life()
 	_build_ambient_particles()
 	_build_clock()
 	_bird_loop()
+
+# ---------------------------------------------------------------- ghost deck
+## Floating glass platform above the east wing — the SUB OPS office where
+## sub-agent ghosts materialize and work. Lives on render layer 2 (with the
+## characters) so the boot-time floorplan capture culls it: the overlay map
+## keeps showing the real rooms beneath. No stairs on purpose — ghosts float.
+
+## Standing spots (one per desk) for ghost clones. Deck top is y 3.46;
+## characters hover at floor + 0.86.
+const GHOST_DESKS := [
+	Vector3(12.0, 4.32, -5.75), Vector3(13.5, 4.32, -5.75),
+	Vector3(15.0, 4.32, -5.75), Vector3(16.5, 4.32, -5.75),
+	Vector3(12.0, 4.32, -2.55), Vector3(13.5, 4.32, -2.55),
+	Vector3(15.0, 4.32, -2.55), Vector3(16.5, 4.32, -2.55),
+]
+
+func _build_ghost_deck() -> void:
+	var deck := Node3D.new()
+	deck.name = "GhostDeck"
+	add_child(deck)
+
+	var glass := StandardMaterial3D.new()
+	glass.albedo_color = Color(0.62, 0.78, 1.0, 0.2)
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.roughness = 0.08
+	glass.metallic = 0.2
+	glass.emission_enabled = true
+	glass.emission = Color(0.5, 0.65, 1.0)
+	glass.emission_energy_multiplier = 0.12
+	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var trim := _mat(Color(0.2, 0.12, 0.4), 0.4, Color(0.6, 0.4, 1.0), 2.2)
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.12, 0.14, 0.26, 0.72)
+	dark.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dark.roughness = 0.3
+	var screen := _mat(Color(0.06, 0.1, 0.2), 0.3, Color(0.45, 0.8, 1.0), 2.6)
+
+	# Glass slab: x 11..17.2, z -8.2..-0.6, hovering over the server room.
+	_deck_box(deck, Vector3(14.1, 3.4, -4.4), Vector3(6.2, 0.12, 7.6), glass)
+	# Glowing edge trim — reads "anti-grav platform" from wallpaper distance.
+	_deck_box(deck, Vector3(14.1, 3.42, -8.18), Vector3(6.2, 0.07, 0.07), trim)
+	_deck_box(deck, Vector3(14.1, 3.42, -0.62), Vector3(6.2, 0.07, 0.07), trim)
+	_deck_box(deck, Vector3(11.04, 3.42, -4.4), Vector3(0.07, 0.07, 7.6), trim)
+	_deck_box(deck, Vector3(17.16, 3.42, -4.4), Vector3(0.07, 0.07, 7.6), trim)
+	# Anti-grav glow discs under the corners.
+	for corner in [Vector3(11.6, 3.28, -7.6), Vector3(16.6, 3.28, -7.6),
+			Vector3(11.6, 3.28, -1.2), Vector3(16.6, 3.28, -1.2)]:
+		var disc := CSGCylinder3D.new()
+		disc.radius = 0.32
+		disc.height = 0.06
+		disc.material = _mat(Color(0.2, 0.3, 0.5), 0.4, Color(0.45, 0.8, 1.0), 2.6)
+		deck.add_child(disc)
+		disc.position = corner
+
+	# Eight ghost desks (2 rows of 4): translucent top, single leg, glowing
+	# screen facing the camera. Ghosts stand at GHOST_DESKS (south side).
+	for i in GHOST_DESKS.size():
+		var stand: Vector3 = GHOST_DESKS[i]
+		var dz := stand.z - 0.85
+		_deck_box(deck, Vector3(stand.x, 4.03, dz), Vector3(0.92, 0.05, 0.52), dark)
+		var leg := CSGCylinder3D.new()
+		leg.radius = 0.05
+		leg.height = 0.56
+		leg.material = dark
+		deck.add_child(leg)
+		leg.position = Vector3(stand.x, 3.74, dz)
+		var scr := _deck_box(deck, Vector3(stand.x, 4.32, dz - 0.12), Vector3(0.64, 0.38, 0.03), screen)
+		scr.rotation_degrees = Vector3(-12, 0, 0)
+
+	# Sign over the north edge, tilted at the camera like the roof billboard.
+	var plate := Label3D.new()
+	plate.text = "GHOST DECK · SUB OPS"
+	plate.font_size = 72
+	plate.outline_size = 16
+	plate.pixel_size = 0.004
+	plate.modulate = Color(0.78, 0.62, 1.0)
+	deck.add_child(plate)
+	plate.position = Vector3(14.1, 4.75, -7.9)
+	plate.rotation_degrees = Vector3(-42, 0, 0)
+
+	# Cool spectral light, masked to layer 2 — the rooms below stay untinted.
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color(0.62, 0.55, 1.0)
+	lamp.light_energy = 1.8
+	lamp.omni_range = 4.5
+	lamp.light_volumetric_fog_energy = 0.2
+	lamp.light_cull_mask = 2
+	deck.add_child(lamp)
+	lamp.position = Vector3(14.1, 5.4, -4.2)
+
+	_set_layer(deck, 2)
+	_no_shadow(deck)
+
+func _deck_box(parent: Node3D, pos: Vector3, size: Vector3, mat: Material) -> CSGBox3D:
+	var b := CSGBox3D.new()
+	b.size = size
+	b.material = mat
+	parent.add_child(b)
+	b.position = pos
+	return b
+
+func _set_layer(node: Node, layer: int) -> void:
+	if node is VisualInstance3D:
+		node.layers = layer
+	for c in node.get_children():
+		_set_layer(c, layer)
 
 # ---------------------------------------------------------------- ambient life
 

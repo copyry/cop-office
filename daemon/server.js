@@ -242,6 +242,21 @@ async function runReplay(minutes = 10, speed = 8) {
 // Dangerous tools route through the Security Center: the PreToolUse hook in
 // workspace/.claude/settings.json long-polls /perm/request and we hold it
 // until the user stamps Allow/Deny.
+// Self-splitting: every top-level run is told it MAY fan out into parallel
+// sub-agent clones by ending its reply with `SUB: <job>` lines. The daemon
+// strips them from the chat, spawns the ghosts, and sends all results back
+// for a final synthesis turn.
+const SUB_NOTE = `
+
+<system-capability>
+ถ้าคำขอนี้ประกอบด้วยงานย่อยอิสระ 2-4 อย่างที่ทำขนานกันได้ (เช่น ค้นหาหลายเรื่อง,
+ตรวจหลายไฟล์, เก็บข้อมูลหลายแหล่ง) คุณสามารถ "แตกร่าง" ได้:
+จบคำตอบด้วยบรรทัดรูปแบบนี้ หนึ่งบรรทัดต่อหนึ่งงานย่อย (สูงสุด 4 บรรทัด):
+SUB: <งานย่อยที่ชัดเจนครบถ้วนในตัวเอง พร้อมบริบทที่จำเป็นทั้งหมด>
+ระบบจะสร้าง sub-agent โคลนของคุณรันขนานกันทันที แล้วส่งผลลัพธ์ทั้งหมดกลับมา
+ให้คุณสรุปเป็นคำตอบสุดท้ายเอง. งานเดี่ยวง่ายๆ ห้ามแตกร่าง — ทำเองตรงๆ.
+</system-capability>`;
+
 function runClaude(agent, prompt, opts = {}) {
   const task = "t" + ++taskCounter;
 
@@ -305,11 +320,14 @@ function runClaude(agent, prompt, opts = {}) {
     shell: true,
     env: { ...process.env, OFFICE_ADAPTER: "1", OFFICE_AGENT: agent, OFFICE_TASK: task },
   });
-  child.stdin.write(preamble + prompt);
+  // The split capability rides on the wire only — never in the chat log.
+  const canSplit = !opts.noSub && !agent.includes("#");
+  child.stdin.write(preamble + prompt + (canSplit ? SUB_NOTE : ""));
   child.stdin.end();
 
   let buf = "";
   const acts = [];      // tool trail — feeds the auto-skill reflection
+  const subTasks = [];  // SUB: lines collected from the reply
   let lastText = "";
   child.stdout.on("data", (c) => {
     buf += c;
@@ -328,7 +346,24 @@ function runClaude(agent, prompt, opts = {}) {
             broadcast({ type: "task.progress", agent, task, tool: b.name });
           } else if (b.type === "text" && b.text.trim()) {
             lastText = b.text;
-            const out = opts.filterText ? opts.filterText(b.text) : b.text;
+            let raw = b.text;
+            // `SUB:` lines are protocol, not prose — strip them and show a
+            // friendly split announcement instead.
+            if (canSplit && /(^|\n)\s*SUB:/.test(raw)) {
+              const kept = [], found = [];
+              for (const ln of raw.split("\n")) {
+                const sm = ln.match(/^\s*SUB:\s*(.+)$/);
+                if (sm && sm[1].trim()) found.push(sm[1].trim());
+                else kept.push(ln);
+              }
+              if (found.length) {
+                subTasks.push(...found);
+                raw = (kept.join("\n").trim() +
+                  `\n\n👻 แตกร่าง ${found.length} sub-agents:\n` +
+                  found.map((t, i) => `${i + 1}. ${t.slice(0, 80)}`).join("\n")).trim();
+              }
+            }
+            const out = opts.filterText ? opts.filterText(raw) : raw;
             if (out) {
               entry.log.push({ who: "agent", text: String(out).slice(0, 8000), ts: Date.now() });
               while (entry.log.length > 200) entry.log.shift();
@@ -346,7 +381,9 @@ function runClaude(agent, prompt, opts = {}) {
         }
         broadcast({ type: m.is_error ? "task.failed" : "task.completed",
           agent, task, session: entry.key });
-        if (!m.is_error) maybeLearnSkill(agent, task, prompt, acts, lastText);
+        if (!m.is_error && subTasks.length)
+          runSubAgents(agent, entry, subTasks.slice(0, 4));
+        else if (!m.is_error) maybeLearnSkill(agent, task, prompt, acts, lastText);
       }
     }
   });
@@ -393,6 +430,135 @@ function ceoFlow(prompt) {
       return keep.join("\n").trim();
     },
   });
+}
+
+// ---------------------------------------------------------------- sub-agents
+// An agent that replied with SUB: lines fans out into parallel ghost clones.
+// Each ghost gets its own labeled session in the "@sub" bucket; when the
+// last one reports back, the parent thread is resumed for a synthesis turn.
+
+function runSubAgents(parentId, parentEntry, tasks) {
+  const stamp = Date.now();
+  broadcast({ type: "subagent.split", agent: parentId, count: tasks.length,
+    session: parentEntry.key });
+  const results = new Array(tasks.length).fill(null);
+  let done = 0;
+  tasks.forEach((t, i) => {
+    const subId = parentId + "#s" + (i + 1);
+    const entry = { key: "u" + stamp + "_" + i, sid: null, ts: Date.now(),
+      title: t.replace(/\s+/g, " ").slice(0, 60), sub: true, parent: parentId,
+      log: [{ who: "you", text: "👻 " + t, ts: Date.now() }] };
+    sess["@sub"] = sess["@sub"] || [];
+    sess["@sub"].push(entry);
+    saveSess();
+    // Slight stagger: the ghosts peel off one by one (and stay kind to the CPU).
+    setTimeout(() => {
+      broadcast({ type: "subagent.spawned", agent: parentId, sub: subId, n: i,
+        text: t, session: entry.key });
+      runSub(parentId, subId, t, entry, (text, ok) => {
+        results[i] = { task: t, text, ok };
+        entry.ok = ok;
+        saveSess();
+        broadcast({ type: "subagent.done", agent: parentId, sub: subId, n: i,
+          ok, session: entry.key });
+        if (++done === tasks.length) synthesize();
+      });
+    }, i * 1500);
+  });
+  function synthesize() {
+    const report = results.map((r, i) =>
+      `--- SUB ${i + 1}: ${r.task}\n${(r.ok && r.text) ? r.text : "(failed / no result)"}`
+    ).join("\n\n");
+    runClaude(parentId,
+      `All your sub-agents have reported back:\n\n${report}\n\n` +
+      `Now synthesize the FINAL answer to the user's original request (earlier ` +
+      `in this conversation), in the user's language. Complete but concise.`,
+      { session: parentEntry.key, noSub: true,
+        logPrompt: `👻 sub-agents ${tasks.length} ตัวรายงานผลครบแล้ว — สรุปผล` });
+  }
+}
+
+// One ghost: a lean twin of runClaude. Pre-created "@sub" entry, parent's
+// tools, no skills preamble, no resume, and never splits further.
+function runSub(parentId, subId, taskText, entry, onDone) {
+  const a = reg.agents[parentId] || { name: parentId, role: "Staff" };
+  const picked = a.tools && a.tools.length ? a.tools
+    : ["Read", "Glob", "Grep", "WebSearch", "WebFetch"];
+  const mcpNames = picked.filter((t) => t.startsWith("mcp:"))
+    .map((t) => t.slice(4)).filter((n) => reg.mcpServers[n]);
+  let tools = picked.filter((t) => !t.startsWith("mcp:")).join(",");
+  let mcpConfig = null;
+  if (mcpNames.length) {
+    const conf = { mcpServers: {} };
+    for (const n of mcpNames) {
+      const parts = String(reg.mcpServers[n].command).trim().split(/\s+/);
+      conf.mcpServers[n] = { command: parts[0], args: parts.slice(1) };
+    }
+    mcpConfig = path.join(__dirname, `mcp_${parentId.replace(/[^\w-]/g, "_")}_sub.json`);
+    fs.writeFileSync(mcpConfig, JSON.stringify(conf));
+    tools += (tools ? "," : "") + mcpNames.map((n) => `mcp__${n}`).join(",");
+  }
+  const args = ["-p", "--output-format", "stream-json", "--verbose",
+    "--allowedTools", tools];
+  if (mcpConfig) args.push("--mcp-config", mcpConfig);
+  const child = spawn("claude", args, {
+    cwd: WORKSPACE, shell: true,
+    env: { ...process.env, OFFICE_ADAPTER: "1", OFFICE_AGENT: subId, OFFICE_TASK: entry.key },
+  });
+  child.stdin.write(
+    `You are a temporary SUB-AGENT — a parallel clone of "${a.name}" (${a.role}) ` +
+    `at this AI office.` +
+    (a.prompt ? `\nParent persona:\n${a.prompt}\n` : "\n") +
+    `You were split off for ONE focused job. Do it fast and directly; your final ` +
+    `message must BE the result (data, findings, answer) — no meta talk, no asking ` +
+    `back. Reply in the language of the job. Never split further.\n\nJOB: ${taskText}`);
+  child.stdin.end();
+  let buf = "", lastText = "", finished = false;
+  const finish = (ok) => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(watchdog);
+    onDone(lastText, ok);
+  };
+  // Ghosts are short-lived by contract — a stuck one is reaped, its slot
+  // reported as failed, so the parent's synthesis always happens.
+  const watchdog = setTimeout(() => {
+    try { spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { shell: true }); } catch {}
+    finish(false);
+  }, 6 * 60000);
+  child.stdout.on("data", (c) => {
+    buf += c;
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line) continue;
+      let m;
+      try { m = JSON.parse(line); } catch { continue; }
+      if (m.type === "assistant" && m.message && Array.isArray(m.message.content)) {
+        for (const b of m.message.content) {
+          if (b.type === "tool_use") {
+            broadcast({ type: "subagent.progress", agent: parentId, sub: subId,
+              tool: b.name, session: entry.key });
+          } else if (b.type === "text" && b.text.trim()) {
+            lastText = b.text;
+            entry.log.push({ who: "agent", text: b.text.slice(0, 8000), ts: Date.now() });
+            while (entry.log.length > 200) entry.log.shift();
+            entry.ts = Date.now();
+            saveSess();
+            broadcast({ type: "chat.message", agent: parentId, sub: subId,
+              text: b.text, session: entry.key });
+          }
+        }
+      } else if (m.type === "result") {
+        if (m.session_id) { entry.sid = m.session_id; saveSess(); }
+        finish(!m.is_error);
+      }
+    }
+  });
+  child.stderr.on("data", (c) => console.error(`[sub:${subId}]`, c.toString().trim()));
+  child.on("error", () => finish(false));
+  child.on("close", () => finish(!!lastText));
 }
 
 // ---------------------------------------------------------------- discussion

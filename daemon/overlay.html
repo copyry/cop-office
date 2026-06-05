@@ -743,33 +743,37 @@
           `<div style="font-size:12px;color:var(--dim)">ยังไม่มี thread เลย</div>`;
         for (const [aid, list] of entries) {
           const isGroup = aid === "@group";
+          const isSub = aid === "@sub";
           const head = document.createElement("div");
           head.className = "arow";
           head.style.cursor = "default";
-          if (!isGroup) {
+          if (!isGroup && !isSub) {
             const f = document.createElement("div");
             f.className = "face"; face(f, aid, 34);
             head.appendChild(f);
           }
           head.insertAdjacentHTML("beforeend",
-            `<div class="meta"><b>${isGroup ? "🗣 การประชุม (group sessions)" : nameOf(aid)}</b>` +
-            `<span>${list.length} ${isGroup ? "ครั้ง" : "thread"}</span></div>`);
+            `<div class="meta"><b>${isGroup ? "🗣 การประชุม (group sessions)"
+              : isSub ? "👻 Sub-agents (ร่างแยก)" : nameOf(aid)}</b>` +
+            `<span>${list.length} ${(isGroup || isSub) ? "ครั้ง" : "thread"}</span></div>`);
           box.appendChild(head);
           for (const s of list.slice().sort((a, b) => b.ts - a.ts)) {
             const row = document.createElement("div");
             row.className = "arow";
             row.style.marginLeft = "18px";
-            row.innerHTML = `<div class="meta"><b>${isGroup ? "🗣" : "🧵"} ${s.title || s.key}</b>` +
-              `<span>${new Date(s.ts).toLocaleString()}</span></div>` +
+            row.innerHTML = `<div class="meta"><b>${isGroup ? "🗣" : isSub ? "👻" : "🧵"} ${s.title || s.key}</b>` +
+              `<span>${isSub ? `ร่างแยกของ ${nameOf(s.parent)} · ` +
+                (s.ok === false ? "✗ ล้มเหลว · " : s.ok ? "✓ สำเร็จ · " : "⏳ · ") : ""}` +
+              `${new Date(s.ts).toLocaleString()}</span></div>` +
               `<div class="winbtn hide" title="ลบ">✕</div>`;
-            if (isGroup) {
-              const strip = facesStrip(s.agents, 22);
+            if (isGroup || isSub) {
+              const strip = facesStrip(isSub ? [s.parent] : s.agents, 22);
               strip.style.flex = "none";
               row.insertBefore(strip, row.querySelector(".meta"));
-            }
-            if (isGroup) {
               row.style.cursor = "pointer";
-              row.querySelector(".meta").onclick = () => { closeModal(); openGroupLog(s.key, s.title || s.key); };
+              row.querySelector(".meta").onclick = () => { closeModal();
+                openGroupLog(s.key, s.title || s.key,
+                  isSub ? "@sub" : "@group", isSub ? s.parent : null); };
             } else row.style.cursor = "default";
             row.querySelector(".winbtn").onclick = (e) => {
               e.stopPropagation();
@@ -1035,17 +1039,22 @@
     return wrap;
   }
 
-  // Meetings are group sessions: open one read-only in the chat pane.
-  async function openGroupLog(key, title) {
+  // Meetings (@group) and sub-agent jobs (@sub) are bucket sessions: open
+  // one read-only in the chat pane; live messages keep streaming in.
+  async function openGroupLog(key, title, bucket = "@group", faceId = null) {
     groupView = key;
-    setThreadLabel("🗣 " + title);
-    document.getElementById("inp").placeholder =
-      "บันทึกการประชุม (อ่านอย่างเดียว) — คลิก agent ใน rail เพื่อกลับไปคุย";
+    setThreadLabel((bucket === "@sub" ? "👻 " : "🗣 ") + title);
+    document.getElementById("inp").placeholder = bucket === "@sub"
+      ? "งานของ sub-agent (อ่านอย่างเดียว) — คลิก agent ใน rail เพื่อกลับไปคุย"
+      : "บันทึกการประชุม (อ่านอย่างเดียว) — คลิก agent ใน rail เพื่อกลับไปคุย";
     log.innerHTML = "";
     try {
-      const r = await fetch(`/sessions/log?agent=${encodeURIComponent("@group")}&key=${encodeURIComponent(key)}`)
+      const r = await fetch(`/sessions/log?agent=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`)
         .then((x) => x.json());
-      for (const m of r.log || []) addMsg("agent", m.who, m.text);
+      for (const m of r.log || []) {
+        if (m.who === "you") addMsg("you", null, m.text);
+        else addMsg("agent", faceId || m.who, m.text);
+      }
     } catch {}
   }
 
@@ -1141,6 +1150,42 @@
         }
       }
     } catch {}
+    // 👻 sub-agent sessions: every split job, readable forever
+    try {
+      const u = await fetch(`/sessions?agent=${encodeURIComponent("@sub")}`).then((x) => x.json());
+      const subs = (u.sessions || []).slice(0, 8);
+      if (subs.length) {
+        const hd = document.createElement("div");
+        hd.className = "opt";
+        hd.style.cursor = "default";
+        hd.style.color = "var(--dim)";
+        hd.style.fontSize = "10.5px";
+        hd.textContent = "—  👻 SUB AGENTS  —";
+        m.appendChild(hd);
+        for (const s of subs) {
+          const o = document.createElement("div");
+          o.className = "opt" + (groupView === s.key ? " active" : "");
+          o.style.display = "block";
+          const top = document.createElement("div");
+          top.style.display = "flex";
+          top.style.alignItems = "center";
+          top.style.gap = "7px";
+          top.appendChild(facesStrip([s.parent], 20));
+          top.appendChild(document.createTextNode(`👻 ${s.title || s.key}`));
+          const sub = document.createElement("small");
+          sub.style.display = "block";
+          sub.style.color = "var(--dim)";
+          sub.style.fontSize = "10px";
+          sub.textContent = `ร่างแยกของ ${nameOf(s.parent)} · ` +
+            (s.ok === false ? "✗ ล้มเหลว" : s.ok ? "✓ สำเร็จ" : "⏳ กำลังทำ") +
+            ` · ${new Date(s.ts).toLocaleString()}`;
+          o.append(top, sub);
+          o.onclick = () => { m.classList.remove("open");
+            openGroupLog(s.key, s.title || s.key, "@sub", s.parent); };
+          m.appendChild(o);
+        }
+      }
+    } catch {}
     m.classList.add("open");
   };
   document.addEventListener("click", () => document.getElementById("sessMenu").classList.remove("open"));
@@ -1211,18 +1256,23 @@
     if (!box) return;
     box.innerHTML = "";
     for (const p of lastPos) {
+      // Ghost clones float on the map too: parent's face, half-there.
+      const isGhost = String(p.id).includes("#");
+      const baseId = String(p.id).split("#")[0];
       const ic = document.createElement("div");
       ic.className = "mapicon px";
       ic.style.left = ((p.x - MAP.x0) / MAP.w * 100) + "%";
       ic.style.top = ((p.z - MAP.z0) / MAP.d * 100) + "%";
-      ic.style.outlineColor = DOTS[p.state] || "#4ade80";
+      ic.style.outlineColor = isGhost ? "#a5b8ff" : (DOTS[p.state] || "#4ade80");
+      if (isGhost) ic.style.opacity = "0.55";
       const k = 26 / 36;
-      ic.style.backgroundImage = `url(/char/npc${npcOf(p.id)}.png)`;
+      ic.style.backgroundImage = `url(/char/npc${npcOf(baseId)}.png)`;
       ic.style.backgroundSize = `${256 * k}px ${512 * k}px`;
       ic.style.backgroundPosition = `${-14 * k}px ${-14 * k}px`;
-      ic.innerHTML = `<div class="tag">${nameOf(p.id)}</div>`;
-      ic.title = `${nameOf(p.id)} — ${p.state}`;
-      ic.onclick = () => { closeModal(); setTarget(p.id); };
+      const label = isGhost ? `👻 ${nameOf(baseId)}` : nameOf(p.id);
+      ic.innerHTML = `<div class="tag">${label}</div>`;
+      ic.title = `${label} — ${p.state}`;
+      if (!isGhost) ic.onclick = () => { closeModal(); setTarget(p.id); };
       box.appendChild(ic);
     }
   }
@@ -1233,6 +1283,29 @@
       body: JSON.stringify(body),
     });
     try { return await r.json(); } catch { return {}; }
+  }
+
+  // Sub-agent (ghost) events: parent's face, spectral naming — never a rail
+  // seat, never a roster entry. Live view appends when watching that session.
+  function routeSub(ev, subId) {
+    const pid = String(ev.agent || subId).split("#")[0];
+    const tag = subId.includes("#") ? subId.split("#")[1].toUpperCase() : "SUB";
+    const gname = `${nameOf(pid)} · ${tag}`;
+    if (ev.replay) return;
+    if (ev.type === "subagent.spawned")
+      addChip(`👻 <b>${gname}</b> แตกร่างขึ้น Ghost Deck — ${String(ev.text || "").slice(0, 60)}`);
+    else if (ev.type === "subagent.done")
+      addChip(`👻 <b>${gname}</b> ${ev.ok ? "งานเสร็จ ✓ กลับเข้าร่าง" : "ล้มเหลว ✗ กลับเข้าร่าง"}`);
+    else if (ev.type === "subagent.progress")
+      addChip(`⚙ <b>${ev.tool || "…"}</b> — 👻 ${gname}`);
+    else if (ev.type === "chat.message") {
+      if (groupView && ev.session === groupView) addMsg("agent", pid, ev.text);
+    }
+    else if (ev.type === "perm.requested") addPermCard({ ...ev, agent: gname });
+    else if (ev.type === "perm.approved" || ev.type === "perm.denied") {
+      removePermCard(ev.perm);
+      addChip(`🛡 ${ev.tool} — <b>${ev.type === "perm.approved" ? "allowed" : "denied"}</b> (👻 ${gname})`);
+    }
   }
 
   // ---- event routing --------------------------------------------------------
@@ -1283,6 +1356,13 @@
     if (ev.theater) {
       if (ev.type === "chat.message") addChip(`⏪ 💬 <b>${ev.agent}</b>: ${String(ev.text).slice(0, 60)}`);
       else if (ev.type === "task.progress") addChip(`⏪ ⚙ ${ev.tool || ""} — ${ev.agent}`);
+      return;
+    }
+    // Ghost traffic peels off before anything can mint a rail seat for it.
+    const subId = ev.sub || (ev.agent && String(ev.agent).includes("#") ? ev.agent : null);
+    if (subId) return routeSub(ev, subId);
+    if (ev.type === "subagent.split") {
+      if (!ev.replay) addChip(`👻 <b>${nameOf(ev.agent)}</b> แตกร่าง ${ev.count} sub-agents → Ghost Deck`);
       return;
     }
     if (ev.agent) ensureAgent(ev.agent);
@@ -1366,7 +1446,7 @@
     const prompt = inp.value.trim();
     if (!prompt) return;
     if (groupView) {
-      addChip("🗣 กำลังดูบันทึกการประชุม — คลิก agent ใน rail เพื่อกลับไปคุย");
+      addChip("📖 กำลังดูบันทึกย้อนหลัง (อ่านอย่างเดียว) — คลิก agent ใน rail เพื่อกลับไปคุย");
       return;
     }
     inp.value = "";

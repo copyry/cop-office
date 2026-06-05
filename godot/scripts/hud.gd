@@ -44,8 +44,17 @@ const STAR_ART: Array[String] = [
 	".ccc.ccc.",
 	".c.....c.",
 ]
+const GHOST_ART: Array[String] = [
+	"..ggggg..",
+	".ggggggg.",
+	".g.ggg.g.",
+	".ggggggg.",
+	".ggggggg.",
+	".g.g.g.g.",
+]
 static var _crown_tex: ImageTexture
 static var _star_tex: ImageTexture
+static var _ghost_tex: ImageTexture
 
 static func _bake_icon(art: Array[String], col: Color) -> ImageTexture:
 	var w: int = art[0].length()
@@ -81,6 +90,14 @@ func register(agent: Node3D, display_name: String, role: String,
 		if _star_tex == null:
 			_star_tex = _bake_icon(STAR_ART, Color(0.45, 0.85, 1.0))
 		icon_tex = _star_tex
+	elif rank == "ghost":
+		# Sub-agent clones: spectral, half-there — like their owner.
+		bg = Color(0.09, 0.11, 0.24, 0.55)
+		border = Color(0.62, 0.7, 1.0, 0.5)
+		name_col = Color(0.82, 0.88, 1.0, 0.92)
+		if _ghost_tex == null:
+			_ghost_tex = _bake_icon(GHOST_ART, Color(0.78, 0.9, 1.0))
+		icon_tex = _ghost_tex
 
 	var style := StyleBoxFlat.new()
 	style.bg_color = bg
@@ -96,6 +113,8 @@ func register(agent: Node3D, display_name: String, role: String,
 	root.add_theme_stylebox_override("panel", style)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.z_index = 5
+	if rank == "ghost":
+		root.modulate = Color(1, 1, 1, 0.85)
 
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 7)

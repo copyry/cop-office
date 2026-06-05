@@ -116,6 +116,16 @@ func _exit_tree() -> void:
 
 var _aura_node: Node3D
 var aura := ""
+var is_ghost := false
+
+## Spectral mode for sub-agent clones: translucent, unshaded (self-lit),
+## shadowless, hovering. Call after the node has entered the tree.
+func set_ghost() -> void:
+	is_ghost = true
+	shaded = false
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	modulate = Color(0.75, 0.92, 1.2, 0.55)
+	_bob_speed = 1.8
 
 ## Equippable cosmetic aura (elemental ground ring) — picked in the editor.
 func set_aura(element: String) -> void:
@@ -235,7 +245,8 @@ func _process(delta: float) -> void:
 	if _mode == "procedural":
 		offset.y = sin(_t) * 0.15
 	else:
-		offset.y = 4.0
+		# Ghosts hover — a visible float on top of the sheet's baked feet line.
+		offset.y = 4.0 + (sin(_t) * 2.6 if is_ghost else 0.0)
 		offset.x = 0.0
 
 	match _mode:
@@ -283,8 +294,10 @@ func walk_to(points: Array) -> float:
 	_walk_tween = create_tween()
 	var from := position
 	var total := 0.0
+	# Ghosts glide much faster than feet walk — and through anything.
+	var speed: float = 3.4 if is_ghost else WALK_SPEED
 	for p in points:
-		var leg_time: float = max(from.distance_to(p) / WALK_SPEED, 0.05)
+		var leg_time: float = max(from.distance_to(p) / speed, 0.05)
 		_walk_tween.tween_property(self, "position", p, leg_time)
 		total += leg_time
 		from = p

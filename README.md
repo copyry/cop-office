@@ -43,6 +43,7 @@ Not a dashboard. Not a chat window. A **world** that renders the true state of y
 - **MMO-style nameplates** on a crisp 2D HUD: portrait, name, role/status, live state pill (IDLE/WORKING/MEETING/BLOCKED/OFFLINE), distance-scaled — with **rank dressing**: the CEO's plate is gold with a pixel crown, the Director's is bright blue with a lead star
 - **Event FX**: pixel-art flipbooks pop above characters — ✅ on task done, ❌ on failure, ❗ at Security, 👍/👎 on decisions, 🎵 when speaking, golden burst on a new skill, sci-fi warps on hire/fire
 - **Equippable auras**: an elemental magic ring (fire/ice/nature/arcane/shadow/gold) under any character, picked in the agent editor — the CEO can wear one too
+- **The Ghost Deck**: a floating glass platform above the east wing with 8 desks — when an agent splits into sub-agents, translucent **ghost clones** of it materialize, float up through the roof (no stairs — they're ghosts), work at a desk with live status plates, then glide home and dissolve back into their owner
 - The idle **Director makes rounds** through the office instead of standing still; the CEO paces the executive floor (that's you)
 - **Mission Control board** in-world: one card per running task, colored by state; lobby status totem shows daemon connectivity (truth, not decoration)
 - Branded boot: a transparent floating logo splash + a pulsing circular logo card — never a black box
@@ -57,6 +58,7 @@ Not a dashboard. Not a chat window. A **world** that renders the true state of y
 - **Tools**: per-agent allowlist over the built-in Claude Code tools, plus custom capability via **MCP servers** (name + launch command → injected with `--mcp-config`)
 - **CEO chain of command**: ordering the CEO summons the Director — he walks over, takes the order, replies with a plan, and dispatches work to teammates via `DELEGATE:` lines (each spawns a real session, with the hand-over walk acted out)
 - **Agent discussions**: pick 2–4 agents and a topic — they hold a real meeting, round-robin turns over a shared transcript, minutes on the in-world whiteboard
+- **Self-splitting sub-agents**: every session is told it may end a reply with `SUB: <job>` lines (2–4) when the request parallelizes — the daemon strips the protocol, spawns parallel clone sessions with the parent's persona + tools, records each in a labeled 👻 session, and resumes the parent for a final synthesis once all ghosts report back (a stuck ghost is reaped after 6 min, so synthesis always happens)
 - **Claude Code hooks integration**: any Claude Code session in this project reports its tool calls — your real work animates the Director automatically
 - **Permission broker**: dangerous tools from adapter sessions are held until you approve
 - **Replay Theater**: `POST /replay` re-enacts the last N minutes time-compressed, in sepia
@@ -75,7 +77,7 @@ Served by the daemon at `http://127.0.0.1:8787/` — best experienced through th
 - **Agent rail**: every staff member with live state dots — 👑 the CEO leads in gold (that seat is you), ⭐ the Director in blue; double-click any seat for an **ID card**
 - **⚙ Office Settings**: hire/edit/delete agents (12-face avatar picker, aura picker, job titles), a **✨ prompt copilot** (type a one-line brief in any language → a drafted system prompt), skills library with the auto-learn toggle, built-in tool catalog + MCP servers, and a thread manager
 - **🗺 Live map**: a real orthographic floorplan render with live agent icons (face, state ring, name) — click one to chat with it
-- **🧵 Threads**: per-conversation chat panes — switching threads or agents loads that conversation's history; a thread bar shows where you are
+- **🧵 Threads**: per-conversation chat panes — switching threads or agents loads that conversation's history; a thread bar shows where you are; meetings (🗣 with participant faces) and sub-agent jobs (👻 with the owner's face + ✓/✗/⏳ status) are readable forever, streaming live while they run
 - **🗣 Discussions**: launch agent-to-agent meetings
 - **🌗 Atmosphere picker**, **⏪ Replay**, collapsible **🛡 Security/Mission sidebar** with a pending-count badge that summons itself when an approval arrives
 - Circular **chat head** (Messenger-style, never steals focus) + system tray (Start with Windows, Exit)
@@ -302,6 +304,7 @@ One JSON event per WebSocket message / journal line: `{type, agent, task?, tool?
 | `perm.requested` / `perm.approved` / `perm.denied` | Security walk + ❗; 👍/👎 |
 | `chat.message` | speech-bubble status + 🎵 + thread history |
 | `collab.started` / `collab.ended` (`agents[]`) | meeting table + whiteboard minutes |
+| `subagent.split` / `.spawned` / `.progress` / `.done` (`sub`) | ghost clones float up to the Ghost Deck, work, dissolve back |
 | `skill.created` | golden burst + "📚 learned" |
 | `ceo.summon` / `task.delegated` | the Director's chain-of-command walks |
 | `roster.sync` / `roster.removed` | registry → world (spawn/update/despawn) |
@@ -339,7 +342,8 @@ this makes them employable"*).
 - [x] Skills library + Hermes-style auto-learning; tools + MCP servers
 - [x] Live top-down map, chat threads with history, CEO chain of command, discussions
 - [x] Day/night + manual atmosphere, roofline clock, ambient life, event FX
-- [ ] **Sub-agents** — task forces that visibly split off a parent agent
+- [x] **Sub-agents** — agents split into parallel ghost clones on the floating
+      Ghost Deck (`SUB:` protocol, per-ghost sessions, auto-synthesis)
 - [ ] Permission policies (always-allow rules, per-agent keycards)
 - [ ] Voice (push-to-talk, wake word)
 - [ ] Packaged installer; macOS/Linux wallpaper backends

@@ -11,6 +11,8 @@ const Fx := preload("res://scripts/fx_factory.gd")
 
 var agents := {}  # id -> {node, state, desk, bed, id, tasks: {task_id: true}}
 var roster := {}  # id -> {name, role, avatar} — the daemon's persistent registry
+var ghosts := {}  # sub id ("pixel#s1") -> {node, desk: GHOST_DESKS index or -1}
+var ghost_desks_free: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7]
 var desk_pool: Array[String] = ["desk1", "desk2", "desk3", "desk4", "desk5", "desk6"]
 # Idle agents spread across the cafeteria AND the recreation room (TV,
 # games, the ball corner, the garden) — the office feels lived-in.
@@ -46,6 +48,11 @@ func _stream_positions() -> void:
 				"state": a.state})
 	if is_instance_valid(ceo) and not agents.has("ceo"):
 		list.append({"id": "ceo", "x": ceo.position.x, "z": ceo.position.z, "state": "idle"})
+	for sub in ghosts:
+		var gh: Dictionary = ghosts[sub]
+		if is_instance_valid(gh.node):
+			list.append({"id": sub, "x": gh.node.position.x, "z": gh.node.position.z,
+				"state": "ghost"})
 	if list.is_empty():
 		return
 	_pos_busy = true
@@ -102,6 +109,19 @@ func handle(evt: Dictionary) -> void:
 		world.set_theater(false)
 		return
 	var theatrical: bool = evt.get("theater", false)
+
+	# Sub-agent traffic → ghost clones, never real hires. Ghosts live only in
+	# the present: journal replays and theater never resurrect them.
+	if evt.has("sub"):
+		if not evt.get("replay", false) and not theatrical:
+			_handle_sub(type, evt)
+		return
+	var hook_id := str(evt.get("agent", ""))
+	if hook_id.contains("#"):
+		# Hook events from a sub-agent's own claude process (progress, perms).
+		if not evt.get("replay", false) and not theatrical:
+			_route_hook_to_ghost(hook_id, type, evt)
+		return
 
 	# Collaboration events may target several agents at once.
 	if type in ["collab.started", "collab.ended"] and evt.has("agents"):
@@ -202,6 +222,10 @@ func handle(evt: Dictionary) -> void:
 				var t: Dictionary = agents[tgt]
 				a.node.walk_to([t.node.position + Vector3(0.6, 0, 0.4)])
 				t.node.set_status("รับงานใหม่ ✏")
+		"subagent.split":
+			# The parent stays at its desk awaiting its clones' reports.
+			_to_desk(a)
+			a.node.set_status("รอผล sub-agents 👻")
 		"skill.created":
 			# Hermes moment: the agent distilled its work into a new skill.
 			a.node.set_status("📚 learned: " + str(evt.get("skill", "")))
@@ -274,6 +298,99 @@ func _remove_agent(id: String) -> void:
 	Fx.spawn(world, "warp_out", a.node.position + Vector3(0, -0.2, 0), 0.022)
 	a.node.queue_free()  # _exit_tree unregisters the nameplate
 	agents.erase(id)
+
+# ---------------------------------------------------------------- ghosts
+# Sub-agent clones: a translucent copy of the parent splits off, floats up
+# (through walls — they're ghosts) to a free desk on the Ghost Deck, works,
+# then glides home and dissolves back into its owner.
+
+func _handle_sub(type: String, evt: Dictionary) -> void:
+	var sub := str(evt.get("sub", ""))
+	if sub == "":
+		return
+	match type:
+		"subagent.spawned":
+			_spawn_ghost(str(evt.get("agent", "")), sub, str(evt.get("text", "")))
+		"subagent.progress":
+			if ghosts.has(sub) and is_instance_valid(ghosts[sub].node):
+				ghosts[sub].node.set_status(str(evt.get("tool", "working…")))
+		"chat.message":
+			if ghosts.has(sub) and is_instance_valid(ghosts[sub].node):
+				var text := str(evt.get("text", "")).split("\n")[0]
+				ghosts[sub].node.set_status("💬 " + text.left(28))
+		"subagent.done":
+			_despawn_ghost(sub, bool(evt.get("ok", true)))
+
+func _spawn_ghost(parent_id: String, sub: String, job: String) -> void:
+	if ghosts.has(sub) or parent_id == "":
+		return
+	var pa: Dictionary = _ensure(parent_id)
+	var pnode: Sprite3D = pa.node
+	var g := _make_char(parent_id)  # the parent's own face and name…
+	g.rank = "ghost"                # …but spectral dressing on the plate
+	g.agent_name = str(g.agent_name) + " · " + sub.get_slice("#", 1).to_upper()
+	g.agent_role = "sub-agent"
+	get_parent().add_child(g)
+	g.set_ghost()
+	g.position = pnode.position + Vector3(0.25, 0, 0.2)
+	var di := -1
+	if ghost_desks_free.size() > 0:
+		di = ghost_desks_free.pop_front()
+	var target: Vector3 = world.GHOST_DESKS[di] if di >= 0 \
+		else Vector3(14.1, 4.9, -4.3) + Vector3(randf_range(-1.6, 1.6), 0, randf_range(-1.2, 1.2))
+	ghosts[sub] = {"node": g, "desk": di}
+	g.set_state("working")
+	g.set_status("👻 " + job.replace("\n", " ").left(26))
+	Fx.spawn(pnode, "warp_in", Vector3(0, -0.2, 0), 0.022)
+	# Materialize…
+	g.modulate.a = 0.0
+	var tw := create_tween()
+	tw.tween_property(g, "modulate:a", 0.55, 0.7)
+	# …rise straight out of the office, then glide onto the deck.
+	g.walk_to([g.position + Vector3(0, 3.6, 0), target])
+
+func _despawn_ghost(sub: String, ok: bool) -> void:
+	if not ghosts.has(sub):
+		return
+	var gh: Dictionary = ghosts[sub]
+	ghosts.erase(sub)
+	if gh.desk >= 0:
+		ghost_desks_free.append(gh.desk)
+	var g: Sprite3D = gh.node
+	if not is_instance_valid(g):
+		return
+	g.set_status("done ✓" if ok else "failed ✗")
+	var hud := get_node_or_null("../Hud")
+	var info: Array = Fx.strip("success" if ok else "failure")
+	if hud and not info.is_empty():
+		hud.fx(g, info[0], info[1], 1)
+	# Glide home and dissolve back into the owner.
+	var dur := 0.0
+	var pid := sub.get_slice("#", 0)
+	if agents.has(pid) and is_instance_valid(agents[pid].node):
+		var home: Vector3 = agents[pid].node.position
+		dur = g.walk_to([g.position + Vector3(0, 1.4, 0), home + Vector3(0, 1.6, 0), home])
+	await get_tree().create_timer(maxf(dur, 0.1) + 0.5).timeout
+	if is_instance_valid(g):
+		Fx.spawn(world, "warp_out", g.position + Vector3(0, -0.2, 0), 0.022)
+		var tw := create_tween()
+		tw.tween_property(g, "modulate:a", 0.0, 0.6)
+		tw.tween_callback(g.queue_free)
+
+func _route_hook_to_ghost(id: String, type: String, evt: Dictionary) -> void:
+	if not ghosts.has(id) or not is_instance_valid(ghosts[id].node):
+		return
+	var g: Sprite3D = ghosts[id].node
+	match type:
+		"task.progress":
+			g.set_status(str(evt.get("tool", "working…")))
+		"perm.requested":
+			g.set_status("needs approval ⚠")
+			_pulse_security()
+		"perm.approved":
+			g.set_status("approved ✓")
+		"perm.denied":
+			g.set_status("denied ✗")
 
 # ---------------------------------------------------------------- agents
 
