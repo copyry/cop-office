@@ -1,10 +1,12 @@
 # Project window manager — tmux-style background sessions on Windows.
-# Every project terminal is spawned under conhost with a BAGIDEA_PROJ_<id>
-# marker baked into its command line. This script can:
-#   sweep        -> print "<id> <visible01>" for every live project window
-#   hide <id>    -> hide the window (claude keeps running in the background)
-#   show <id>    -> bring the hidden window back (resume)
-#   stop <id>    -> kill the whole window tree for real
+# Project terminals are `conhost cmd /k "title BAGIDEA_PROJ_<id> && …"`.
+# The console HWND may be owned by the cmd, its conhost parent, or a child
+# (claude retitles and respawns things) — so we match the window against the
+# WHOLE process family of the marker cmd: parent + all descendants.
+#   sweep        -> "<id> <visible01>" per live project window
+#   hide <id>    -> hide the window (claude keeps running)
+#   show <id>    -> bring the same window back (resume)
+#   stop <id>    -> kill the whole family for real
 param([string]$Action = "sweep", [string]$Id = "")
 
 Add-Type @"
@@ -14,47 +16,82 @@ public class WU {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
   public delegate bool EnumProc(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc p, IntPtr l);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 }
 "@
 
-function Find-Win([uint32]$ProcId) {
-  $script:tgt = $ProcId
-  $script:hit = [IntPtr]::Zero
-  $cb = [WU+EnumProc]{ param($h, $l)
-    $o = [uint32]0
-    [void][WU]::GetWindowThreadProcessId($h, [ref]$o)
-    if ($o -eq $script:tgt) { $script:hit = $h }
-    return $true
-  }
-  [void][WU]::EnumWindows($cb, [IntPtr]::Zero)
-  return $script:hit
+# One process snapshot for everything.
+$all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine
+$kids = @{}
+foreach ($p in $all) {
+  $pp = [string]$p.ParentProcessId
+  if (-not $kids.ContainsKey($pp)) { $kids[$pp] = @() }
+  $kids[$pp] += $p.ProcessId
 }
 
-$procs = Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" |
-  Where-Object { $_.CommandLine -match 'BAGIDEA_PROJ_' }
+# Collect every top-level window once: pid -> best candidate. Processes
+# (conhost, claude, node) also own invisible helper windows — score real
+# consoles above ghosts: visible (+2) and titled (+1) wins.
+$script:winByPid = @{}
+$cb = [WU+EnumProc]{ param($h, $l)
+  $o = [uint32]0
+  [void][WU]::GetWindowThreadProcessId($h, [ref]$o)
+  $k = [string]$o
+  $vis = [WU]::IsWindowVisible($h)
+  $score = 0
+  if ($vis) { $score += 2 }
+  if ([WU]::GetWindowTextLength($h) -gt 0) { $score += 1 }
+  if (-not $script:winByPid.ContainsKey($k) -or $score -gt $script:winByPid[$k].score) {
+    $script:winByPid[$k] = @{ h = $h; vis = $vis; score = $score }
+  }
+  return $true
+}
+[void][WU]::EnumWindows($cb, [IntPtr]::Zero)
 
-foreach ($p in $procs) {
+# The real session hosts: cmd /k carrying our marker (the transient
+# `cmd /c start …` launcher also contains the marker — skip it).
+$hosts = $all | Where-Object {
+  $_.Name -eq "cmd.exe" -and $_.CommandLine -match "BAGIDEA_PROJ_([\w-]+)" -and
+  $_.CommandLine -match "/k"
+}
+
+foreach ($p in $hosts) {
   if ($p.CommandLine -notmatch 'BAGIDEA_PROJ_([\w-]+)') { continue }
   $projId = $Matches[1]
-  # The console HWND belongs to the cmd itself or its conhost parent.
-  $h = Find-Win ([uint32]$p.ProcessId)
-  if ($h -eq [IntPtr]::Zero -and $p.ParentProcessId) {
-    $h = Find-Win ([uint32]$p.ParentProcessId)
+
+  # Family = parent (conhost) + the cmd + every descendant (claude, node…).
+  $family = New-Object System.Collections.Generic.List[string]
+  if ($p.ParentProcessId) { $family.Add([string]$p.ParentProcessId) }
+  $queue = @([string]$p.ProcessId)
+  while ($queue.Count -gt 0) {
+    $cur = $queue[0]; $queue = $queue[1..$queue.Count]
+    $family.Add($cur)
+    if ($kids.ContainsKey($cur)) { $queue += ($kids[$cur] | ForEach-Object { [string]$_ }) }
   }
+
+  # Best-scored window across the whole family (never the first ghost).
+  $win = $null
+  foreach ($f in $family) {
+    if ($script:winByPid.ContainsKey($f)) {
+      $cand = $script:winByPid[$f]
+      if (-not $win -or $cand.score -gt $win.score) { $win = $cand }
+    }
+  }
+
   if ($Action -eq "sweep") {
     $vis = 0
-    if ($h -ne [IntPtr]::Zero -and [WU]::IsWindowVisible($h)) { $vis = 1 }
+    if ($win -and $win.vis) { $vis = 1 }
     Write-Output "$projId $vis"
   } elseif ($projId -eq $Id) {
     switch ($Action) {
-      "hide" { if ($h -ne [IntPtr]::Zero) { [void][WU]::ShowWindow($h, 0) } }
+      "hide" { if ($win) { [void][WU]::ShowWindow($win.h, 0) } }
       "show" {
-        if ($h -ne [IntPtr]::Zero) {
-          [void][WU]::ShowWindow($h, 9)
-          [void][WU]::SetForegroundWindow($h)
+        if ($win) {
+          [void][WU]::ShowWindow($win.h, 9)
+          [void][WU]::SetForegroundWindow($win.h)
         }
       }
       "stop" { taskkill /PID $p.ProcessId /T /F | Out-Null }

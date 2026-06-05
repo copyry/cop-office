@@ -237,6 +237,36 @@
   #activity .act b { color: #cfe3ff; font-weight: 600; }
   #activity .act .t { color: rgba(160,170,190,0.55); font-size: 10px; margin-right: 5px; }
 
+  /* ---- 📂 in-house folder picker ----------------------------------------- */
+  #fsPick {
+    display: none; position: fixed; inset: 0; z-index: 300;
+    background: rgba(4, 7, 13, 0.6); backdrop-filter: blur(3px);
+    align-items: center; justify-content: center;
+  }
+  #fsPick.open { display: flex; }
+  #fsCard {
+    width: min(430px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
+    background: linear-gradient(160deg, #15203a 0%, #0c1322 70%);
+    border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.65);
+    animation: popIn 0.25s cubic-bezier(.2,1.3,.4,1) both;
+  }
+  #fsCard h3 { font-size: 12.5px; letter-spacing: 2px; color: var(--accent);
+    display: flex; gap: 8px; margin-bottom: 8px; }
+  #fsCard h3 .x { margin-left: auto; cursor: pointer; }
+  #fsDrives { display: flex; gap: 5px; flex-wrap: wrap; }
+  #fsDrives .chk { padding: 3px 9px; }
+  #fsPath { flex: 1; font-size: 11.5px; }
+  #fsList { flex: 1; overflow-y: auto; min-height: 180px; max-height: 320px;
+    border: 1px solid var(--line); border-radius: 9px; padding: 4px;
+    background: rgba(0,0,0,0.25); }
+  .fsrow {
+    display: flex; align-items: center; gap: 8px; padding: 5px 9px;
+    border-radius: 7px; cursor: pointer; font-size: 12.5px; color: #d5e2f5;
+  }
+  .fsrow:hover { background: rgba(94,200,255,0.12); }
+  .fsrow.sel { background: rgba(94,200,255,0.2); outline: 1px solid var(--accent); }
+
   /* ---- 🏢 org chart ------------------------------------------------------ */
   .orgrow { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
   .orgline { width: 2px; height: 16px; margin: 2px auto;
@@ -526,6 +556,28 @@
 
 <div id="dayMenu"></div>
 <div id="sessMenu"></div>
+
+<!-- 📂 In-house folder picker (Blender-style) — no Windows dialogs. -->
+<div id="fsPick">
+  <div id="fsCard">
+    <h3>📂 เลือกโฟลเดอร์ <span class="x" id="fsCancel">✕</span></h3>
+    <div id="fsDrives"></div>
+    <div class="assistrow" style="margin:8px 0 6px">
+      <button id="fsUp" title="ขึ้นหนึ่งระดับ">⬆</button>
+      <input id="fsPath" spellcheck="false">
+      <button id="fsGo" title="ไปที่ path นี้">→</button>
+    </div>
+    <div id="fsList"></div>
+    <div class="assistrow" style="margin-top:8px">
+      <input id="fsNew" placeholder="ชื่อโฟลเดอร์ใหม่…">
+      <button id="fsMk">➕</button>
+    </div>
+    <div class="btnrow" style="margin-top:10px">
+      <button id="fsNo">ยกเลิก</button>
+      <button class="primary" id="fsOk">✓ เลือกโฟลเดอร์นี้</button>
+    </div>
+  </div>
+</div>
 <div id="modal"><div id="modalCard"></div></div>
 
 <script>
@@ -1377,6 +1429,71 @@
     modalCard.querySelector("#cardChat").onclick = () => { closeModal(); setTarget(id); };
   }
 
+  // ---- 📂 in-house folder picker (Blender-style, on-theme) -----------------
+  const fsPick = document.getElementById("fsPick");
+  let _fsResolve = null, _fsDir = "", _fsSel = "";
+  async function fsLoad(dir) {
+    const r = await fetch("/fs?dir=" + encodeURIComponent(dir || ""))
+      .then((x) => x.json()).catch(() => ({ path: dir, dirs: [], drives: [] }));
+    _fsDir = r.path;
+    _fsSel = "";
+    document.getElementById("fsPath").value = r.path;
+    const dv = document.getElementById("fsDrives");
+    dv.innerHTML = "";
+    for (const d of r.drives || []) {
+      const c = document.createElement("div");
+      c.className = "chk" + (String(r.path).toUpperCase()[0] === d[0] ? " on" : "");
+      c.textContent = "💾 " + d.slice(0, 2);
+      c.onclick = () => fsLoad(d);
+      dv.appendChild(c);
+    }
+    const list = document.getElementById("fsList");
+    list.innerHTML = (r.dirs || []).length ? "" :
+      `<div style="font-size:11px;color:var(--dim);padding:8px">— ไม่มีโฟลเดอร์ย่อย —</div>`;
+    for (const name of r.dirs || []) {
+      const row = document.createElement("div");
+      row.className = "fsrow";
+      row.textContent = "📁 " + name;
+      row.onclick = () => {
+        list.querySelectorAll(".fsrow").forEach((x) => x.classList.remove("sel"));
+        row.classList.add("sel");
+        _fsSel = name;
+      };
+      row.ondblclick = () => fsLoad(_fsDir.replace(/[\\/]+$/, "") + "\\" + name);
+      list.appendChild(row);
+    }
+    const up = document.getElementById("fsUp");
+    up.disabled = !r.parent;
+    up.onclick = r.parent ? () => fsLoad(r.parent) : null;
+  }
+  function pickFolder(start) {
+    return new Promise((resolve) => {
+      _fsResolve = resolve;
+      fsPick.classList.add("open");
+      fsLoad(start || _fsDir || "");
+    });
+  }
+  function fsDone(v) {
+    fsPick.classList.remove("open");
+    if (_fsResolve) { _fsResolve(v); _fsResolve = null; }
+  }
+  document.getElementById("fsCancel").onclick = () => fsDone(null);
+  document.getElementById("fsNo").onclick = () => fsDone(null);
+  document.getElementById("fsOk").onclick = () =>
+    fsDone(_fsSel ? _fsDir.replace(/[\\/]+$/, "") + "\\" + _fsSel : _fsDir);
+  document.getElementById("fsGo").onclick = () =>
+    fsLoad(document.getElementById("fsPath").value.trim());
+  document.getElementById("fsPath").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") fsLoad(e.target.value.trim());
+  });
+  document.getElementById("fsMk").onclick = async () => {
+    const n = document.getElementById("fsNew").value.trim();
+    if (!n) return;
+    await api("/fs/mkdir", { dir: _fsDir, name: n });
+    document.getElementById("fsNew").value = "";
+    fsLoad(_fsDir);
+  };
+
   // ---- 🗂 Office Ops: jobs / calendar / notes / org chart -------------------
   document.getElementById("opsBtn").onclick = () => openOps("jobs");
   async function openOps(tab) {
@@ -1484,12 +1601,15 @@
         for (const p of list) {
           const row = document.createElement("div");
           row.className = "arow";
-          const st = p.open && p.visible ? `<span style="color:#4ade80">🖥 เปิดอยู่</span>`
-            : p.open ? `<span style="color:#c0a4ff">🫥 ทำงานเบื้องหลัง</span>`
-            : p.ai ? `<span style="color:#5ec8ff">🤖 AI กำลังทำงาน</span>`
-            : `<span style="color:var(--dim)">⚪ ปิด</span>`;
-          // State-driven controls: closed → เปิด; visible → ซ่อน(ทำงานต่อ)+ปิด;
-          // hidden → Resume+ปิด. Shell/folder always; one delete per origin.
+          // WHO is in here: you (window) and/or named agents — explicit.
+          const who = (p.agents || []).map(nameOf).join(", ");
+          const st = [];
+          if (p.open && p.visible) st.push(`<span style="color:#4ade80">🖥 คุณเปิดทำงานอยู่</span>`);
+          else if (p.open) st.push(`<span style="color:#c0a4ff">🫥 ของคุณทำงานเบื้องหลัง</span>`);
+          if (p.ai) st.push(`<span style="color:#5ec8ff">🤖 ${who || "agent"} กำลังทำงาน</span>`);
+          if (!st.length) st.push(`<span style="color:var(--dim)">⚪ ปิด — ไม่มีใครทำงาน</span>`);
+          // State-driven controls: closed → เปิด; visible → ซ่อน+ปิด;
+          // hidden → Resume+ปิด. Shell/folder always; ✕ always; 🗑 created-only.
           const main = !p.open
             ? `<div class="winbtn" title="เปิดโปรเจค (เลือก session ให้เองอัตโนมัติ)">▶</div>`
             : p.visible
@@ -1498,14 +1618,15 @@
               : `<div class="winbtn" title="Resume — เรียกหน้าต่างเดิมกลับมา">▶</div>
                  <div class="winbtn" title="ปิดจริง (จบการทำงานเบื้องหลัง)">⏹</div>`;
           row.innerHTML = `<div class="meta"><b>📁 ${p.name.replace(/</g, "&lt;")}</b>
-              <span>${p.dir.replace(/</g, "&lt;")} · ${st}</span></div>` + main +
+              <span>${p.dir.replace(/</g, "&lt;")} · ${st.join(" · ")}</span></div>` + main +
             `<div class="winbtn" title="เทอร์มินัลเปล่า (ไม่นับว่าเปิดโปรเจค)">🖥</div>
-            <div class="winbtn" title="เปิดโฟลเดอร์">📂</div>` +
+            <div class="winbtn" title="เปิดโฟลเดอร์">📂</div>
+            <div class="winbtn hide" title="เอาออกจากรายการ (ไฟล์ยังอยู่)">✕</div>` +
             (p.created
-              ? `<div class="winbtn hide" title="ลบโปรเจคออกจากเครื่องจริงๆ">🗑</div>`
-              : `<div class="winbtn hide" title="เอาออกจากรายการ (ไฟล์ยังอยู่)">✕</div>`);
+              ? `<div class="winbtn hide" title="ลบโปรเจคออกจากเครื่องจริงๆ">🗑</div>` : "");
           const b = [...row.querySelectorAll(".winbtn")];
-          const refresh = () => setTimeout(() => openOps("proj"), 2800);
+          const refresh = () => setTimeout(() => openOps("proj"), 2600);
+          const metaSpan = () => row.querySelector(".meta span");
           if (!p.open) {
             b[0].onclick = () => api("/projects/open", { id: p.id, mode: "play" }).then(refresh);
           } else if (p.visible) {
@@ -1518,25 +1639,29 @@
           const o = p.open ? 1 : 0;  // extra button when open
           b[1 + o].onclick = () => api("/projects/open", { id: p.id, mode: "shell" });
           b[2 + o].onclick = () => api("/projects/open", { id: p.id, mode: "folder" });
-          const delBtn = b[3 + o];
-          if (p.created) {
-            delBtn.onclick = () => {
-              if (row.dataset.del === "1")
-                api("/projects", { removeDisk: p.id }).then(() => openOps("proj"));
-              else {
-                row.dataset.del = "1";
-                row.querySelector(".meta span").innerHTML =
-                  `<span style="color:#ff6258">⚠ จะลบโฟลเดอร์ ${p.dir.replace(/</g, "&lt;")} ออกจากเครื่องจริงๆ — กด 🗑 อีกครั้งเพื่อยืนยัน</span>`;
-                setTimeout(() => { if (row.dataset.del === "1") { row.dataset.del = ""; openOps("proj"); } }, 5000);
-              }
-            };
-          } else {
-            delBtn.onclick = () => {
-              if (row.dataset.rm === "1") api("/projects", { remove: p.id }).then(() => openOps("proj"));
-              else { row.dataset.rm = "1"; delBtn.textContent = "แน่ใจ?"; delBtn.style.color = "#ffb054";
-                setTimeout(() => { row.dataset.rm = ""; delBtn.textContent = "✕"; delBtn.style.color = ""; }, 3000); }
-            };
-          }
+          // ✕ remove-from-list (files stay) — confirm in the meta line, the
+          // round button can't hold words.
+          b[3 + o].onclick = () => {
+            if (row.dataset.rm === "1")
+              api("/projects", { remove: p.id }).then(() => openOps("proj"));
+            else {
+              row.dataset.rm = "1";
+              metaSpan().innerHTML =
+                `<span style="color:#ffb054">เอาออกจากรายการเฉยๆ (ไฟล์ยังอยู่ครบ) — กด ✕ อีกครั้งเพื่อยืนยัน</span>`;
+              setTimeout(() => { if (row.dataset.rm === "1") { row.dataset.rm = ""; openOps("proj"); } }, 4000);
+            }
+          };
+          // 🗑 real disk delete — created-by-app only.
+          if (p.created && b[4 + o]) b[4 + o].onclick = () => {
+            if (row.dataset.del === "1")
+              api("/projects", { removeDisk: p.id }).then(() => openOps("proj"));
+            else {
+              row.dataset.del = "1";
+              metaSpan().innerHTML =
+                `<span style="color:#ff6258">⚠ จะลบโฟลเดอร์ ${p.dir.replace(/</g, "&lt;")} ออกจากเครื่องจริงๆ — กด 🗑 อีกครั้งเพื่อยืนยัน</span>`;
+              setTimeout(() => { if (row.dataset.del === "1") { row.dataset.del = ""; openOps("proj"); } }, 5000);
+            }
+          };
           box.appendChild(row);
         }
       }
@@ -1553,7 +1678,7 @@
       placeSel.onchange = () => {
         pathRow.style.display = placeSel.value === "__path" ? "flex" : "none";
       };
-      const browse = async () => (await api("/browse", {})).path || "";
+      const browse = () => pickFolder();  // in-house picker, on-theme
       modalCard.querySelector("#pPathBrowse").onclick = async () => {
         const p = await browse();
         if (p) pathInp.value = p;
@@ -2091,6 +2216,16 @@
       delete ROSTER[ev.agent];
       if (target === ev.agent) setTarget("main");
       renderRail();
+      return;
+    }
+    if (ev.type === "projects.changed") {
+      // Live-refresh the PROJECTS tab (status flips) — but never while the
+      // user is typing in a form or picking a folder.
+      const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(
+        (document.activeElement || {}).tagName);
+      if (modal.classList.contains("open") && modalCard.querySelector("#plist") &&
+          !fsPick.classList.contains("open") && !typing)
+        openOps("proj");
       return;
     }
     if (ev.type === "ui.daylight") { dayMode = ev.hour; return; }

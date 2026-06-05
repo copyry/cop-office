@@ -282,7 +282,8 @@ for (const p of projects) if (p.created === undefined) { p.created = true; migra
 const saveProjects = () => fs.writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2));
 if (migrated) saveProjects();
 let projWin = {};           // project id -> visible (true) / hidden (false)
-const projRuns = {};        // project id -> active AI runs
+const projRuns = {};        // project id -> active AI run count
+const projAgents = {};      // project id -> {agentId: run count} (who's working)
 const WINPROJ = path.join(__dirname, "winproj.ps1");
 
 function winproj(action, id, cb) {
@@ -326,8 +327,12 @@ function sweepProjects() {
 function projectStatus() {
   return projects.map((p) => ({ ...p,
     open: p.id in projWin, visible: !!projWin[p.id],
-    ai: (projRuns[p.id] || 0) > 0 }));
+    ai: (projRuns[p.id] || 0) > 0,
+    agents: Object.keys(projAgents[p.id] || {}) }));
 }
+
+// Snappier liveness: the window sweep runs every 10 seconds.
+setInterval(sweepProjects, 10000);
 
 // ---- job runner: per-agent queue + a global cap so the machine breathes.
 const agentBusy = new Set();
@@ -463,7 +468,12 @@ function runClaude(agent, prompt, opts = {}) {
   if (isNew && opts.project && projectDir(opts.project)) entry.proj = opts.project;
   const projId = entry.proj && projectDir(entry.proj) ? entry.proj : null;
   const cwd = projId ? projectDir(projId) : WORKSPACE;
-  if (projId) projRuns[projId] = (projRuns[projId] || 0) + 1;
+  if (projId) {
+    projRuns[projId] = (projRuns[projId] || 0) + 1;
+    projAgents[projId] = projAgents[projId] || {};
+    projAgents[projId][agent] = (projAgents[projId][agent] || 0) + 1;
+    broadcast({ type: "projects.changed" }, false);
+  }
   entry.log = entry.log || [];
   entry.log.push({ who: "you", text: String(opts.logPrompt || prompt).slice(0, 4000), ts: Date.now() });
   while (entry.log.length > 200) entry.log.shift();
@@ -525,10 +535,18 @@ function runClaude(agent, prompt, opts = {}) {
   // opts.onDone(finalText, ok) fires exactly once when this run truly ends —
   // if the agent splits, ownership passes to the synthesis run instead.
   let doneFired = false;
+  const releaseProj = () => {
+    if (!projId) return;
+    projRuns[projId] = Math.max(0, (projRuns[projId] || 1) - 1);
+    const pa = projAgents[projId] || {};
+    pa[agent] = Math.max(0, (pa[agent] || 1) - 1);
+    if (!pa[agent]) delete pa[agent];
+    broadcast({ type: "projects.changed" }, false);
+  };
   const fireDone = (text, ok) => {
     if (doneFired) return;
     doneFired = true;
-    if (projId) projRuns[projId] = Math.max(0, (projRuns[projId] || 1) - 1);
+    releaseProj();
     if (opts.onDone) try { opts.onDone(text, ok); } catch (e) { console.error("[onDone]", e); }
   };
   child.stdout.on("data", (c) => {
@@ -591,7 +609,7 @@ function runClaude(agent, prompt, opts = {}) {
           agent, task, session: entry.key });
         if (!m.is_error && subTasks.length) {
           doneFired = true;  // the synthesis run inherits the callback
-          if (projId) projRuns[projId] = Math.max(0, (projRuns[projId] || 1) - 1);
+          releaseProj();
           runSubAgents(agent, entry, subTasks.slice(0, 4), opts.onDone);
         } else {
           fireDone(lastText, !m.is_error);
@@ -1312,26 +1330,41 @@ const server = http.createServer((req, res) => {
       } catch (e) { res.writeHead(400); res.end(String(e.message)); }
     });
 
-  } else if (req.method === "POST" && req.url === "/browse") {
-    // Native folder picker (PowerShell STA FolderBrowserDialog) — the
-    // honest way to let a webview UI pick real directories.
+  } else if (req.method === "GET" && req.url.startsWith("/fs")) {
+    // Directory listing for the in-house folder picker (Blender-style UI in
+    // the overlay — no off-theme Windows dialogs).
     {
-      const { execFile } = require("child_process");
-      execFile("powershell", ["-STA", "-NoProfile", "-Command",
-        "Add-Type -AssemblyName System.Windows.Forms; " +
-        "$f = New-Object System.Windows.Forms.FolderBrowserDialog; " +
-        "$f.Description = 'เลือกโฟลเดอร์'; $f.ShowNewFolderButton = $true; " +
-        // A topmost invisible owner — the overlay is always-on-top and was
-        // burying the dialog behind itself.
-        "$o = New-Object System.Windows.Forms.Form; $o.TopMost = $true; " +
-        "$o.ShowInTaskbar = $false; $o.Opacity = 0; $o.Width = 1; $o.Height = 1; " +
-        "$o.Show(); $o.Activate(); " +
-        "$null = $f.ShowDialog($o); $o.Close(); $f.SelectedPath"],
-        { timeout: 120000, windowsHide: true }, (e, out) => {
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ path: String(out || "").trim() }));
-        });
+      const q = new URL(req.url, "http://x").searchParams;
+      let dir = q.get("dir") || "";
+      const drives = [];
+      for (let c = 65; c <= 90; c++) {
+        const d = String.fromCharCode(c) + ":\\";
+        try { if (fs.existsSync(d)) drives.push(d); } catch {}
+      }
+      if (!dir) dir = drives.includes("D:\\") ? "D:\\" : drives[0] || "C:\\";
+      let dirs = [];
+      try {
+        dirs = fs.readdirSync(dir, { withFileTypes: true })
+          .filter((e) => e.isDirectory() && !e.name.startsWith(".") &&
+            !e.name.startsWith("$"))
+          .map((e) => e.name).sort((a, b) => a.localeCompare(b));
+      } catch {}
+      const parent = path.dirname(dir);
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ path: dir, parent: parent === dir ? null : parent,
+        dirs, drives }));
     }
+
+  } else if (req.method === "POST" && req.url === "/fs/mkdir") {
+    readBody(req, (body) => {
+      try {
+        const { dir, name } = JSON.parse(body);
+        const n = String(name || "").trim().replace(/[<>:"/\\|?*]/g, "");
+        if (!dir || !n) throw new Error("need dir + name");
+        fs.mkdirSync(path.join(dir, n));
+        res.writeHead(200); res.end("ok");
+      } catch (e) { res.writeHead(400); res.end(String(e.message)); }
+    });
 
   } else if (req.method === "POST" && req.url === "/places") {
     readBody(req, (body) => {
