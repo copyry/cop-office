@@ -317,11 +317,20 @@ function ensureTrusted(dir) {
 
 // Mentioning a registered project by name in chat binds the thread to it:
 // the agent runs INSIDE that directory and the project lights up 🤖.
+// Matching is forgiving: case- and space-insensitive.
 function projectFromPrompt(prompt) {
-  const text = String(prompt).toLowerCase();
+  const squash = (s) => String(s).toLowerCase().replace(/\s+/g, "");
+  const text = squash(prompt);
   const hits = projects.filter((p) =>
-    p.name.length >= 3 && text.includes(p.name.toLowerCase()));
+    p.name.length >= 3 && text.includes(squash(p.name)));
   return hits.length === 1 ? hits[0].id : null;
+}
+
+// Project by display name (the Director's `@ <project>` routing).
+function projectByName(name) {
+  const n = String(name || "").trim().toLowerCase();
+  const p = projects.find((x) => x.name.toLowerCase() === n);
+  return p ? p.id : null;
 }
 
 // How many claude sessions already live in this directory? (claude keeps
@@ -368,6 +377,7 @@ ${places}
 คุณมีอำนาจตัดสินใจเต็มที่ในงานที่ได้รับมอบ ทำเสร็จแล้วต้องสรุปผลให้ผู้สั่งงานชัดเจน.
 สำคัญ: เช็ครายการข้างบนก่อนเสมอ — โปรเจคที่มีอยู่แล้ว "ห้ามลงทะเบียนซ้ำ" และห้ามใช้
 โฟลเดอร์ของ place เป็น path โปรเจคโดยตรง (ระบบจะปฏิเสธ).
+ห้ามเด็ดขาด: ลบ/ถอดโปรเจคออกจากรายการ (API remove/removeDisk) เว้นแต่ผู้ใช้สั่งเองชัดๆ.
 การทดสอบใดๆ (เช่น เว็บ) ให้ใช้วิธีเบื้องหลังก่อนเสมอ (curl / headless / สคริปต์)
 อย่าเปิดหน้าต่างรบกวนผู้ใช้; ถ้าจำเป็นต้องเปิดจริงๆ จนไม่มีทางอื่น ให้รันคำสั่งเปิดตรงๆ
 แล้วระบบ Security จะขอ allow จากผู้ใช้ให้เอง.
@@ -515,11 +525,24 @@ function runClaude(agent, prompt, opts = {}) {
   }
   // Project binding: a requested project claims new threads — and adopts
   // existing ones that were never bound. Threads keep their home after.
+  // A stale binding (project unregistered/recreated) heals instead of
+  // silently dropping the run back into the workspace.
+  if (entry.proj && !projectDir(entry.proj)) entry.proj = null;
   if (opts.project && projectDir(opts.project) && (isNew || !entry.proj))
     entry.proj = opts.project;
   const projId = entry.proj && projectDir(entry.proj) ? entry.proj : null;
   const cwd = projId ? projectDir(projId) : WORKSPACE;
   if (projId) ensureTrusted(cwd);
+  // claude sessions are PER-DIRECTORY: a sid born in another cwd cannot be
+  // resumed here. Ground truth beats bookkeeping — check the actual session
+  // file under this cwd; missing means a fresh claude session here (our own
+  // thread log keeps the visible history).
+  if (entry.sid) {
+    const enc = String(cwd).replace(/[^a-zA-Z0-9]/g, "-");
+    const sidFile = path.join(require("os").homedir(), ".claude", "projects",
+      enc, entry.sid + ".jsonl");
+    if (!fs.existsSync(sidFile)) entry.sid = null;
+  }
   if (projId) {
     projRuns[projId] = (projRuns[projId] || 0) + 1;
     projAgents[projId] = projAgents[projId] || {};
@@ -656,7 +679,8 @@ function runClaude(agent, prompt, opts = {}) {
           }
         }
       } else if (m.type === "result") {
-        // Session bookkeeping: remember the thread we just extended.
+        // Session bookkeeping: remember the thread we just extended (and
+        // which directory that claude session lives in).
         if (m.session_id) {
           entry.sid = m.session_id;
           entry.ts = Date.now();
@@ -712,8 +736,12 @@ You are the Director. Your team:
 ${teamList()}
 To hand work to a member, include a line EXACTLY in this format:
 DELEGATE: <agent_id> :: <clear, self-contained instruction>
-(one line per assignment — dispatched automatically; their result is reported
-back to you when they finish, so you can answer questions or follow up).
+When the work belongs inside a registered project, ROUTE it explicitly:
+DELEGATE: <agent_id> @ <project name> :: <instruction>
+(the member then runs INSIDE that project's directory — its claude session
+lives there, the owner can resume it, and the project lights up as working).
+One line per assignment — dispatched automatically; their result is reported
+back to you when they finish, so you can answer questions or follow up.
 IMPORTANT: prose like assigning work in words does NOTHING — only the
 DELEGATE line dispatches work.
 
@@ -774,7 +802,9 @@ function makeDelegateFilter(depth, session, onHit) {
   return (text) => {
     const keep = [];
     for (const ln of String(text).split("\n")) {
-      const m = ln.match(/^\s*DELEGATE:\s*([^:]+?)\s*::\s*(.+)$/);
+      // DELEGATE: <agent> :: <job>   — or, routed into a workspace:
+      // DELEGATE: <agent> @ <project name> :: <job>
+      const m = ln.match(/^\s*DELEGATE:\s*([^:@]+?)(?:\s*@\s*([^:]+?))?\s*::\s*(.+)$/);
       // Accept the agent id OR its display name (models love names).
       let tgt = null;
       if (m) {
@@ -786,14 +816,16 @@ function makeDelegateFilter(depth, session, onHit) {
       if (tgt && tgt !== "ceo" && tgt !== "main") {
         broadcast({ type: "task.delegated", agent: "main", target: tgt });
         if (onHit) onHit();
-        const inst = m[2];
+        const inst = m[3];
         const t = tgt;
-        // Delegates inherit the Director's project workspace: if the
-        // target's latest thread lives elsewhere, give them a fresh one.
+        // Project routing: explicit `@ project` wins; otherwise inherit the
+        // Director's own workspace. A target whose latest thread lives
+        // elsewhere gets a fresh one.
         const ml = sess["main"] || [];
         const me = session ? ml.find((x) => x.key === session)
           : (ml.length ? ml.reduce((a, b) => (a.ts > b.ts ? a : b)) : null);
-        const proj = me && me.proj;
+        const proj = (m[2] && projectByName(m[2])) || (me && me.proj) ||
+          projectFromPrompt(inst);
         const tl = sess[t] || [];
         const te = tl.length ? tl.reduce((a, b) => (a.ts > b.ts ? a : b)) : null;
         setTimeout(() => runClaude(t, inst, {   // after the hand-over walk
@@ -1313,12 +1345,17 @@ const server = http.createServer((req, res) => {
     readBody(req, (body) => {
       try {
         const p = JSON.parse(body);
+        // Removal is HUMAN-ONLY: the overlay sends this header; an agent's
+        // curl can never unregister or delete a project again.
+        const humanUI = !!req.headers["x-bagidea-ui"];
         if (p.remove) {
+          if (!humanUI) { res.writeHead(403); return res.end("human UI only"); }
           projects = projects.filter((x) => x.id !== p.remove);
           saveProjects();
           res.writeHead(200); return res.end("ok");
         }
         if (p.removeDisk) {
+          if (!humanUI) { res.writeHead(403); return res.end("human UI only"); }
           const proj = projects.find((x) => x.id === p.removeDisk);
           if (!proj) { res.writeHead(404); return res.end("unknown project"); }
           if (!proj.created) { res.writeHead(403); return res.end("not created by this app"); }
@@ -1661,6 +1698,15 @@ const server = http.createServer((req, res) => {
       try { p = JSON.parse(body); } catch { res.writeHead(400); return res.end(); }
       let { id, agent = "claude", task = "", tool = "?", input = "" } = p;
       if (agent === "claude") agent = "main";  // host session = the Director
+      // "Allow ตลอดไป" rules answer instantly — running processes can't
+      // change their allowlist, but the broker can stop asking.
+      const base = String(agent).split("#")[0];
+      if (((reg.autoAllow || {})[base] || []).includes(tool)) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ decision: "allow" }));
+        broadcast({ type: "perm.approved", agent, task, tool, perm: id, via: "rule" });
+        return;
+      }
       broadcast({ type: "perm.requested", agent, task, tool, perm: id, input });
       const timer = setTimeout(() => {
         // No human around — deny safely and let the agent re-plan.
@@ -1672,7 +1718,22 @@ const server = http.createServer((req, res) => {
   } else if (req.method === "POST" && req.url === "/perm/respond") {
     readBody(req, (body) => {
       try {
-        const { id, decision } = JSON.parse(body);
+        const { id, decision, always } = JSON.parse(body);
+        // "Allow ตลอดไป": remember the grant — broker auto-approves future
+        // requests AND the tool joins the agent's allowlist for new runs.
+        if (always && decision === "allow") {
+          const pend = pendingPerms.get(id);
+          if (pend) {
+            const base = String(pend.agent).split("#")[0];
+            reg.autoAllow = reg.autoAllow || {};
+            reg.autoAllow[base] = [...new Set([...(reg.autoAllow[base] || []), pend.tool])];
+            const a = reg.agents[base];
+            if (a && Array.isArray(a.tools) && !a.tools.includes(pend.tool))
+              a.tools.push(pend.tool);
+            saveReg();
+            pushRoster();
+          }
+        }
         const ok = finishPerm(id, decision === "allow" ? "allow" : "deny", "user");
         res.writeHead(ok ? 200 : 404);
         res.end(ok ? "ok" : "unknown id");

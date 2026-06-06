@@ -989,18 +989,24 @@
     d.innerHTML =
       `<b>${ev.agent}</b> requests <span class="tool">${ev.tool}</span>` +
       `<pre>${input.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]))}</pre>` +
-      `<div class="row"><button class="allow">✓ Allow</button><button class="deny">✗ Deny</button></div>`;
-    d.querySelector(".allow").onclick = () => respondPerm(ev.perm, "allow");
-    d.querySelector(".deny").onclick = () => respondPerm(ev.perm, "deny");
+      `<div class="row"><button class="allow">✓ Allow</button>` +
+      `<button class="allow" style="border-color:#4ade80;color:#4ade80" ` +
+      `title="อนุญาต ${ev.tool} ให้ agent นี้ตลอดไป — ไม่ถามซ้ำอีก">✓✓ ตลอดไป</button>` +
+      `<button class="deny">✗ Deny</button></div>`;
+    const btns = d.querySelectorAll("button");
+    btns[0].onclick = () => respondPerm(ev.perm, "allow");
+    btns[1].onclick = () => respondPerm(ev.perm, "allow", true);
+    btns[2].onclick = () => respondPerm(ev.perm, "deny");
     permsEl.appendChild(d);
     setSide(true);  // a pending approval summons the Security Center
     renderBadge();
   }
-  async function respondPerm(id, decision) {
+  async function respondPerm(id, decision, always = false) {
     const r = await fetch("/perm/respond", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, decision }),
+      body: JSON.stringify({ id, decision, always }),
     });
+    if (r.ok && always) addChip("🛡 จำสิทธิ์แล้ว — เครื่องมือนี้จะไม่ถามซ้ำสำหรับ agent นี้");
     if (!r.ok) {
       // Stale card (daemon restarted / request already timed out) — clean up.
       removePermCard(id);
@@ -2214,7 +2220,8 @@
 
   async function api(url, body) {
     const r = await fetch(url, {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST",
+      headers: { "content-type": "application/json", "x-bagidea-ui": "1" },
       body: JSON.stringify(body),
     });
     try { return await r.json(); } catch { return {}; }
