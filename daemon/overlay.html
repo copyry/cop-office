@@ -348,15 +348,20 @@
   /* 🎤 live dictation pill — pulses while the mic is hot, shows the words */
   #pttLive {
     display: none; position: fixed; left: 50%; bottom: 64px; z-index: 60;
-    transform: translateX(-50%); max-width: 86%; align-items: center; gap: 7px;
-    padding: 8px 16px; font-size: 12.5px; color: #ffe2e6;
-    background: rgba(40, 12, 18, 0.92); border: 1px solid rgba(255, 90, 110, 0.75);
+    transform: translateX(-50%); width: min(86%, 340px); align-items: center; gap: 7px;
+    padding: 8px 14px; font-size: 12.5px; color: #ffe2e6;
+    background: rgba(40, 12, 18, 0.94); border: 1px solid rgba(255, 90, 110, 0.75);
     border-radius: 999px; box-shadow: 0 6px 24px rgba(255, 60, 80, 0.25);
     animation: recpulse 1.2s ease-in-out infinite;
   }
   #pttLive.on { display: flex; }
-  #pttLive span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  body.feedmode #pttLive { bottom: 14px; font-size: 11.5px; }
+  #pttLive input {
+    flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+    color: #ffe9ec; font-size: 12.5px; caret-color: #ff8a9a;
+  }
+  #pttLive input::placeholder { color: rgba(255, 200, 210, 0.55); }
+  #pttLive .hint { flex: none; font-size: 9.5px; color: rgba(255, 190, 200, 0.6); }
+  body.feedmode #pttLive { bottom: 14px; }
   @keyframes recpulse {
     0%, 100% { border-color: rgba(255, 90, 110, 0.75); }
     50% { border-color: rgba(255, 90, 110, 0.25); }
@@ -367,9 +372,12 @@
      modes show a single line ("N งาน · latest…") and the full list opens
      on demand in a bounded, scrollable panel. */
   #nowStrip, #feedTasks { display: none; }
-  #nowStrip.on { display: block; }
-  #nowStrip {
-    border-bottom: 1px solid var(--line); background: rgba(94,200,255,0.045);
+  /* Normal + mini mode: a floating card under the header — it OVERLAYS the
+     chat (like the feed strip) instead of pushing content down. */
+  #nowStrip.on {
+    display: block; position: absolute; top: 38px; left: 8px; right: 8px; z-index: 30;
+    background: rgba(10, 16, 28, 0.94); border: 1px solid rgba(94,200,255,0.3);
+    border-radius: 10px; box-shadow: 0 8px 22px rgba(0,0,0,0.4);
   }
   body.feedmode #nowStrip { display: none !important; }
   body.feedmode #feedTasks.on {
@@ -393,7 +401,7 @@
     color: rgba(207,227,255,0.75); min-width: 0;
   }
   .nowsum .caret { margin-left: auto; color: var(--dim); flex: none; font-size: 10px; }
-  .nowlist { display: none; max-height: 150px; overflow-y: auto; padding: 0 6px 6px; }
+  .nowlist { display: none; max-height: 160px; overflow-y: auto; padding: 0 6px 6px; }
   .nowopen .nowlist { display: block; }
   .nowrow {
     display: flex; align-items: center; gap: 7px; padding: 4px 7px; margin-top: 3px;
@@ -406,7 +414,11 @@
   .nowrow b { color: #8fd4ff; flex: none; }
   .nowrow span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @keyframes nowpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-  @media (max-width: 480px), (max-height: 460px) { #nowStrip { display: none !important; } }
+  /* mini mode keeps the strip too — it floats, so it costs no space */
+  @media (max-width: 480px), (max-height: 460px) {
+    #nowStrip.on { top: 34px; left: 6px; right: 6px; }
+    .nowlist { max-height: 110px; }
+  }
   #feedEmpty {
     color: rgba(140, 158, 188, 0.55); font-size: 11px; text-align: center;
     padding: 10px 0;
@@ -662,10 +674,11 @@
 <div id="feed">
   <div id="feedEmpty">— เงียบสงบ… รอความเคลื่อนไหวในออฟฟิศ —</div>
 </div>
-<!-- 🎤 live dictation pill: visible in BOTH modes while the mic is hot -->
-<div id="pttLive">🎤 <span></span></div>
-<!-- invisible landing strip for push-to-talk dictation in feed mode -->
-<input id="pttInp" style="position:fixed;left:-30px;top:-30px;width:10px;height:10px;opacity:0.01" tabindex="-1">
+<!-- 🎤 live dictation pill — the input INSIDE it is the real dictation
+     target: voice typing attaches to a genuine visible box, and what you
+     say appears right here, in every mode -->
+<div id="pttLive">🎤 <input id="pttInp" placeholder="กำลังฟัง… พูดได้เลย" autocomplete="off" spellcheck="false">
+  <span class="hint">F6 = ส่ง</span></div>
 
 <div id="threadBar">🧵 thread: <b id="threadName">ล่าสุด (ต่อเนื่องอัตโนมัติ)</b></div>
 <footer>
@@ -985,6 +998,10 @@
       btn.classList.toggle("rec", on);
       if (input) input.focus();
       shellPost(on ? "micdown" : "micup");
+      // The caret must SIT in the box when Win+H opens (shell waits ~250ms)
+      // — re-assert focus right before, and once more after, so you SEE the
+      // words land where you expect them.
+      if (on && input) setTimeout(() => input.focus(), 180);
       if (!on && input) input.focus();
     };
   }
@@ -994,26 +1011,17 @@
   // mic OFF + the words go STRAIGHT to the Director. Independent from the
   // mic buttons; works in normal / mini / feed mode alike (dictation lands
   // in the hidden #pttInp, never in a visible box).
-  let _pttTimer = null;
   function pttLive(on) {
-    const pill = document.getElementById("pttLive");
-    clearInterval(_pttTimer);
-    if (!on) { pill.classList.remove("on"); return; }
-    pill.classList.add("on");
-    const box = document.getElementById("pttInp");
-    const paint = () => {
-      const v = (box && box.value || "").trim();
-      pill.querySelector("span").textContent =
-        (v || "กำลังฟัง… พูดได้เลย") + "  · กด F6 อีกครั้งเพื่อส่ง";
-    };
-    paint();
-    _pttTimer = setInterval(paint, 250);
+    document.getElementById("pttLive").classList.toggle("on", on);
   }
   window.pttStart = () => {
+    pttLive(true);              // show FIRST — a hidden input can't be focused
     const box = document.getElementById("pttInp");
     box.value = "";
     box.focus();
-    pttLive(true);
+    // Re-assert the caret after the shell's focus dance settles, right
+    // before Win+H fires — dictation must attach to THIS box.
+    setTimeout(() => box.focus(), 180);
   };
   window.pttEnd = () => {
     // Voice typing finalizes its last words a beat after closing.

@@ -55,28 +55,81 @@ enum UserEvent {
     WorldReady,
 }
 
-/// "ctrl+space" → a registered global push-to-talk chord.
-fn parse_hotkey(s: &str) -> Option<global_hotkey::hotkey::HotKey> {
-    use global_hotkey::hotkey::{Code, HotKey, Modifiers};
-    let mut mods = Modifiers::empty();
-    let mut code = None;
+/// "ctrl+space" / "f6" → (modifier flags, virtual key) for RegisterHotKey.
+fn parse_vk(s: &str) -> Option<(u32, u32)> {
+    let mut mods = 0u32; // MOD_ALT 1 | MOD_CONTROL 2 | MOD_SHIFT 4
+    let mut vk = None;
     for part in s.to_lowercase().split('+') {
         match part.trim() {
-            "ctrl" | "control" => mods |= Modifiers::CONTROL,
-            "shift" => mods |= Modifiers::SHIFT,
-            "alt" => mods |= Modifiers::ALT,
-            "space" => code = Some(Code::Space),
-            "f5" => code = Some(Code::F5),
-            "f6" => code = Some(Code::F6),
-            "f7" => code = Some(Code::F7),
-            "f8" => code = Some(Code::F8),
-            "f9" => code = Some(Code::F9),
-            "f10" => code = Some(Code::F10),
+            "ctrl" | "control" => mods |= 0x0002,
+            "shift" => mods |= 0x0004,
+            "alt" => mods |= 0x0001,
+            "space" => vk = Some(0x20u32),
+            "f5" => vk = Some(0x74),
+            "f6" => vk = Some(0x75),
+            "f7" => vk = Some(0x76),
+            "f8" => vk = Some(0x77),
+            "f9" => vk = Some(0x78),
+            "f10" => vk = Some(0x79),
             "none" | "" => return None,
             _ => {}
         }
     }
-    code.map(|c| HotKey::new(if mods.is_empty() { None } else { Some(mods) }, c))
+    vk.map(|v| (mods, v))
+}
+
+/// Global voice hotkey — OUR OWN RegisterHotKey on a dedicated thread with
+/// its own GetMessage pump (the canonical pattern; WM_HOTKEY is posted to
+/// the REGISTERING thread's queue, so delivery cannot depend on anyone
+/// else's event loop). MOD_NOREPEAT kills key auto-repeat at the OS level.
+static PTT_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn spawn_hotkey_thread(
+    proxy: tao::event_loop::EventLoopProxy<UserEvent>,
+    initial: Option<(u32, u32)>,
+) {
+    std::thread::spawn(move || unsafe {
+        use std::sync::atomic::Ordering;
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_APP, WM_HOTKEY};
+        PTT_THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
+        let mut ok = false;
+        if let Some((m, v)) = initial {
+            ok = RegisterHotKey(std::ptr::null_mut(), 1, m | 0x4000, v) != 0;
+        }
+        ptt_beacon(if ok { "registered" } else { "register-FAILED" });
+        let mut msg: MSG = std::mem::zeroed();
+        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+            if msg.message == WM_HOTKEY {
+                ptt_beacon("hook-press");
+                let _ = proxy.send_event(UserEvent::PttKey(true));
+            } else if msg.message == WM_APP {
+                // rebind: wParam = modifier flags, lParam = vk (0 = disable)
+                UnregisterHotKey(std::ptr::null_mut(), 1);
+                let vk = msg.lParam as u32;
+                if vk != 0 {
+                    let r = RegisterHotKey(std::ptr::null_mut(), 1, (msg.wParam as u32) | 0x4000, vk);
+                    ptt_beacon(if r != 0 { "rehook-ok" } else { "rehook-FAILED" });
+                } else {
+                    ptt_beacon("rehook-none");
+                }
+            }
+        }
+    });
+}
+
+fn rebind_hotkey(s: &str) {
+    use std::sync::atomic::Ordering;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_APP};
+    let tid = PTT_THREAD_ID.load(Ordering::SeqCst);
+    if tid == 0 {
+        return;
+    }
+    let (mods, vk) = parse_vk(s).unwrap_or((0, 0));
+    unsafe {
+        PostThreadMessageW(tid, WM_APP, mods as usize, vk as isize);
+    }
 }
 
 /// Synthetic key chords. Voice input = push-to-talk over Windows Voice
@@ -110,6 +163,11 @@ fn send_win_h() {
 /// found by its owning PROCESS, not by name.
 static VOICE_HIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+struct VoiceEnumCtx {
+    include_hidden: bool,
+    found: Vec<HWND>,
+}
+
 unsafe extern "system" fn enum_voice_windows(
     h: HWND,
     l: windows_sys::Win32::Foundation::LPARAM,
@@ -118,7 +176,9 @@ unsafe extern "system" fn enum_voice_windows(
     use windows_sys::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
     };
-    if IsWindowVisible(h) == 0 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
+    let ctx = &mut *(l as *mut VoiceEnumCtx);
+    if !ctx.include_hidden && IsWindowVisible(h) == 0 {
         return 1;
     }
     let mut pid = 0u32;
@@ -126,35 +186,67 @@ unsafe extern "system" fn enum_voice_windows(
     if pid == 0 {
         return 1;
     }
+    // Primary: the owning process is TextInputHost.exe.
+    let mut is_voice = false;
     let hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-    if hp.is_null() {
-        return 1;
-    }
-    let mut buf = [0u16; 512];
-    let mut len = 512u32;
-    let ok = QueryFullProcessImageNameW(hp, 0, buf.as_mut_ptr(), &mut len);
-    CloseHandle(hp);
-    if ok != 0 {
-        let path = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
-        if path.ends_with("textinputhost.exe") {
-            (*(l as *mut Vec<HWND>)).push(h);
+    if !hp.is_null() {
+        let mut buf = [0u16; 512];
+        let mut len = 512u32;
+        if QueryFullProcessImageNameW(hp, 0, buf.as_mut_ptr(), &mut len) != 0 {
+            let path = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
+            is_voice = path.ends_with("textinputhost.exe");
         }
+        CloseHandle(hp);
+    }
+    // Fallback: AppContainer processes can refuse OpenProcess — the panel's
+    // window title is "Windows Input Experience" (verified on this machine).
+    if !is_voice {
+        let mut t = [0u16; 64];
+        let n = GetWindowTextW(h, t.as_mut_ptr(), 64);
+        if n > 0 && String::from_utf16_lossy(&t[..n as usize]) == "Windows Input Experience" {
+            is_voice = true;
+        }
+    }
+    if is_voice {
+        ctx.found.push(h);
     }
     1
 }
 
-fn visible_voice_windows() -> Vec<HWND> {
-    let mut v: Vec<HWND> = Vec::new();
+fn voice_windows(include_hidden: bool) -> Vec<HWND> {
+    let mut ctx = VoiceEnumCtx { include_hidden, found: Vec::new() };
     unsafe {
-        EnumWindows(Some(enum_voice_windows), &mut v as *mut _ as isize);
+        EnumWindows(Some(enum_voice_windows), &mut ctx as *mut _ as isize);
     }
-    v
+    ctx.found
 }
 
-/// Mic ON: keep the system panel hidden for as long as the mic is hot
-/// (hiding the window does not stop recognition) — OUR red pill/button is
-/// the indicator. The panel re-shows itself on state changes, so a little
-/// daemon thread re-hides it every 250 ms until told to stop.
+/// Make one panel window invisible: SW_HIDE plus the layered-alpha-0 trick —
+/// cross-process style changes are allowed for WS_EX_LAYERED, and a fully
+/// transparent window stays "shown" in the host's eyes, so it doesn't fight
+/// back. Recognition keeps running either way.
+unsafe fn cloak_voice_window(h: HWND) {
+    let ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+    SetWindowLongW(h, GWL_EXSTYLE, (ex | WS_EX_LAYERED) as i32);
+    SetLayeredWindowAttributes(h, 0, 0, LWA_ALPHA);
+    ShowWindow(h, SW_HIDE);
+}
+
+/// Undo the cloak for EVERY panel window (hidden ones included) so a manual
+/// Win+H later shows a perfectly normal panel.
+fn voice_uncloak_all() {
+    for h in voice_windows(true) {
+        unsafe {
+            SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
+            let ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+            SetWindowLongW(h, GWL_EXSTYLE, (ex & !WS_EX_LAYERED) as i32);
+        }
+    }
+}
+
+/// Mic ON: keep the system panel invisible for as long as the mic is hot —
+/// OUR red pill/button is the indicator. The panel re-shows itself on state
+/// changes, so a little daemon thread re-cloaks it every 200 ms.
 fn voice_hide(on: bool) {
     use std::sync::atomic::Ordering;
     if !on {
@@ -167,35 +259,47 @@ fn voice_hide(on: bool) {
     std::thread::spawn(|| {
         use std::sync::atomic::Ordering;
         while VOICE_HIDE.load(Ordering::SeqCst) {
-            for h in visible_voice_windows() {
+            for h in voice_windows(false) {
                 unsafe {
-                    ShowWindow(h, SW_HIDE);
+                    cloak_voice_window(h);
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(250));
+            std::thread::sleep(std::time::Duration::from_millis(200));
         }
     });
 }
 
-/// Mic OFF: stop hiding, toggle the panel closed, then VERIFY — if a panel
-/// window survives, toggle once more, and as a last resort hide it so it can
-/// never squat on the screen.
+/// Mic OFF: stop cloaking, toggle the panel closed, restore its looks for
+/// future manual use, and VERIFY — a survivor gets one more toggle and, as
+/// the last resort, a fresh cloak so it can never squat on the screen.
 fn voice_close() {
     voice_hide(false);
     std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(250));
         send_win_h();
         std::thread::sleep(std::time::Duration::from_millis(900));
-        if !visible_voice_windows().is_empty() {
+        voice_uncloak_all();
+        if !voice_windows(false).is_empty() {
             send_win_h();
-            std::thread::sleep(std::time::Duration::from_millis(700));
-            for h in visible_voice_windows() {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            for h in voice_windows(false) {
                 unsafe {
-                    ShowWindow(h, SW_HIDE);
+                    cloak_voice_window(h);
                 }
             }
         }
     });
+}
+
+/// Debug beacon: stages of the hotkey chain are reported to the daemon —
+/// `ui.ptt` lines in the journal make the whole thing testable end-to-end.
+fn ptt_beacon(stage: &str) {
+    let body = format!(r#"{{"type":"ui.ptt","stage":"{}"}}"#, stage);
+    let _ = Command::new("curl")
+        .args(["-s", "-X", "POST", "http://127.0.0.1:8787/event",
+            "-H", "content-type: application/json", "-d", &body])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
 }
 
 /// Voice typing lands wherever the FOREGROUND focus is — and plain
@@ -574,24 +678,11 @@ fn main() {
     let autostart_id = autostart_item.id().clone();
     let exit_id = exit_item.id().clone();
 
-    // ---- global push-to-talk hotkey (default Ctrl+Space, overlay-config)
-    let hk_mgr = global_hotkey::GlobalHotKeyManager::new().ok();
-    let mut cur_hotkey = parse_hotkey("f6");
-    if let (Some(m), Some(hk)) = (hk_mgr.as_ref(), cur_hotkey) {
-        let _ = m.register(hk);
-    }
-    // Hotkey presses arrive on a hook thread — forwarding them through the
-    // event-loop proxy WAKES the loop even when none of our windows is
-    // active. (The old try_recv polling slept with the loop: F6 from another
-    // app did nothing until some unrelated event woke us — user-reported.)
-    let p_hotkey = event_loop.create_proxy();
-    global_hotkey::GlobalHotKeyEvent::set_event_handler(Some(
-        move |e: global_hotkey::GlobalHotKeyEvent| {
-            let _ = p_hotkey.send_event(UserEvent::PttKey(
-                e.state == global_hotkey::HotKeyState::Pressed,
-            ));
-        },
-    ));
+    // ---- global voice hotkey (default F6, overlay-configurable).
+    // The global-hotkey crate never delivered events on this machine
+    // (proven via journal beacons) — we own a RegisterHotKey thread instead:
+    // WM_HOTKEY lands on ITS queue, the proxy wakes the tao loop, done.
+    spawn_hotkey_thread(event_loop.create_proxy(), parse_vk("f6"));
 
     // Office pid for hide/show of the wallpaper window.
     let office_pid = office_child.as_ref().map(|c| c.id()).unwrap_or(0);
@@ -726,10 +817,16 @@ fn main() {
 
     let mut mini = false;
     let mut feed = false;
-    let mut ptt_held = false;
     let mut ptt_on = false;
+    let mut last_ptt = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(10))
+        .unwrap_or_else(std::time::Instant::now);
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+        // WaitUntil, never Wait: the tray channels are POLLED here, and a
+        // sleeping loop reads nothing. A 150 ms tick costs nothing and keeps
+        // every channel live.
+        *control_flow = ControlFlow::WaitUntil(
+            std::time::Instant::now() + std::time::Duration::from_millis(150));
 
         let mut shutdown = false;
         let mut toggle = false;
@@ -869,21 +966,23 @@ fn main() {
                 UserEvent::DragOrb => { let _ = orb.drag_window(); }
                 UserEvent::DragOverlay => { let _ = overlay.drag_window(); }
                 UserEvent::MicDown => {
-                    overlay.set_focus();  // voice typing lands in the focused box
-                    force_foreground(overlay.hwnd() as HWND);
-                    std::thread::sleep(std::time::Duration::from_millis(160));
+                    // The user CLICKED the button — our window already owns
+                    // the foreground; a forced ALT-tap here only knocked the
+                    // caret out of the input box (user-reported).
+                    overlay.set_focus();
+                    std::thread::sleep(std::time::Duration::from_millis(250));
                     send_win_h();
                     voice_hide(true);   // our red button IS the indicator
                 }
                 UserEvent::MicUp => voice_close(),
                 UserEvent::PttKey(pressed) => {
                     // Global voice hotkey (F6): press toggles the mic — ON
-                    // dictates a command, OFF sends it to the office. The
-                    // auto-repeat a held key generates is debounced.
-                    if !pressed {
-                        ptt_held = false;
-                    } else if !ptt_held {
-                        ptt_held = true;
+                    // dictates a command, OFF sends it to the office.
+                    // Debounce is TIME-based: key auto-repeat arrives well
+                    // under 600 ms apart, and we never depend on Released
+                    // events being delivered.
+                    if pressed && last_ptt.elapsed().as_millis() >= 600 {
+                        last_ptt = std::time::Instant::now();
                         if !ptt_on {
                             // ── mic ON: the live pill needs the overlay on
                             // screen, and dictation needs a real foreground
@@ -911,26 +1010,18 @@ fn main() {
                             std::thread::sleep(std::time::Duration::from_millis(230));
                             send_win_h();
                             voice_hide(true);
+                            ptt_beacon("mic-on");
                         } else {
                             // ── mic OFF: close + verify, then send to office.
                             ptt_on = false;
                             voice_close();
                             let _ = overlay_view
                                 .evaluate_script("window.pttEnd && pttEnd()");
+                            ptt_beacon("mic-off-send");
                         }
                     }
                 }
-                UserEvent::SetHotkey(s) => {
-                    if let Some(m) = hk_mgr.as_ref() {
-                        if let Some(old) = cur_hotkey {
-                            let _ = m.unregister(old);
-                        }
-                        cur_hotkey = parse_hotkey(&s);
-                        if let Some(hk) = cur_hotkey {
-                            let _ = m.register(hk);
-                        }
-                    }
-                }
+                UserEvent::SetHotkey(s) => rebind_hotkey(&s),
             },
             _ => {}
         }
