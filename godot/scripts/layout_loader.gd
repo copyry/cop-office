@@ -179,18 +179,19 @@ func _spawn(it: Dictionary) -> void:
 			# imported image → textured quad you can hang anywhere
 			_spawn_poster(rig, String(it.get("asset", "")), float(it.get("w", 1.2)), float(it.get("h", 0.8)))
 		"model":
-			# imported .glb/.gltf placed in the world
-			_spawn_model(rig, String(it.get("asset", "")), String(it.get("anim", "")))
+			# imported .glb/.gltf/.fbx placed in the world (auto-fitted)
+			_spawn_model(rig, String(it.get("asset", "")), String(it.get("anim", "")), float(it.get("fit", 1.1)))
 		_:
 			var d := _box(0.6, 0.6, 0.6, _mat(col))
 			d.position.y = 0.3
 			rig.add_child(d)
 
 func _abs_asset(asset: String) -> String:
-	# editor stores /uploads/<name> or an absolute path; both resolve to a
-	# file the daemon can also serve, but Godot reads the disk path directly.
+	# editor stores res://… (bundled furniture), /uploads/<name>, or an absolute
+	# path; all resolve to a disk path Godot reads directly.
+	if asset.begins_with("res://"):
+		return ProjectSettings.globalize_path(asset)
 	if asset.begins_with("/uploads/"):
-		var home := OS.get_environment("USERPROFILE")
 		# uploads live in <repo>/workspace/uploads — resolve via project dir
 		return ProjectSettings.globalize_path("res://..") + "/workspace/uploads/" + asset.get_file()
 	return asset
@@ -215,7 +216,7 @@ func _spawn_poster(rig: Node3D, asset: String, w: float, h: float) -> void:
 	mi.position.y = h * 0.5 + 0.8
 	rig.add_child(mi)
 
-func _spawn_model(rig: Node3D, asset: String, anim := "") -> void:
+func _spawn_model(rig: Node3D, asset: String, anim := "", fit := 1.1) -> void:
 	if asset == "":
 		return
 	var p := _abs_asset(asset)
@@ -228,11 +229,12 @@ func _spawn_model(rig: Node3D, asset: String, anim := "") -> void:
 			scene = doc.generate_scene(state)
 	elif ext == "fbx":
 		var doc2 := FBXDocument.new()
-		var state2 := GLTFState.new()
+		var state2 := FBXState.new()
 		if doc2.append_from_file(p, state2) == OK:
 			scene = doc2.generate_scene(state2)
-	if scene:
+	if scene and scene is Node3D:
 		rig.add_child(scene)
+		_fit_model(scene as Node3D, fit)
 		# play the animation the editor picked for this instance
 		var ap := scene.find_child("AnimationPlayer", true, false)
 		if ap and ap is AnimationPlayer:
@@ -242,3 +244,27 @@ func _spawn_model(rig: Node3D, asset: String, anim := "") -> void:
 				pick = String(names[0])   # default: first clip
 			if pick != "" and pick in names:
 				(ap as AnimationPlayer).play(pick)
+
+## Normalise an imported model to a sane floor footprint + sit its base on y=0,
+## so any unit/origin (glb or fbx, bundled or user import) renders consistently.
+func _fit_model(scene: Node3D, target: float) -> void:
+	var aabb := _node_aabb(scene, Transform3D.IDENTITY)
+	if aabb.size == Vector3.ZERO: return
+	var span: float = max(aabb.size.x, aabb.size.z)
+	if span <= 0.0001: span = max(aabb.size.y, 0.0001)
+	var f: float = target / span
+	scene.scale = Vector3(f, f, f)
+	scene.position.y = -aabb.position.y * f
+
+func _node_aabb(n: Node, xform: Transform3D) -> AABB:
+	var acc := AABB(); var has := false
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh:
+		acc = xform * (n as MeshInstance3D).mesh.get_aabb(); has = true
+	for c in n.get_children():
+		var cx := xform
+		if c is Node3D: cx = xform * (c as Node3D).transform
+		var sub := _node_aabb(c, cx)
+		if sub.size != Vector3.ZERO:
+			if has: acc = acc.merge(sub)
+			else: acc = sub; has = true
+	return acc

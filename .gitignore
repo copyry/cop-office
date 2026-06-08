@@ -36,6 +36,7 @@ _assets_tmp/
 *.rar
 *.7z
 godot/assets/env/
+godot/assets/decor/
 
 _shots/
 shots/
@@ -53,3 +54,4 @@ daemon/i18n/
 dist/
 daemon/presets.json
 daemon/assets.json
+daemon/stats.json

@@ -46,6 +46,7 @@ var _assets_req: HTTPRequest
 var ui: Control
 var custom_presets: Array = []
 var library: Array = []           # [{path, kind, name}]
+var _decor_cache := {}            # {category: [name…]} bundled Low Poly furniture
 
 const TYPES := [
 	["desk", "🪑 Desk"], ["table", "🍽 Table"], ["chair", "💺 Chair"],
@@ -61,6 +62,14 @@ const SYS_TYPES := [
 ]
 const WORK_ANCHORS := ["desk1", "desk2", "desk3", "desk4", "desk5", "desk6"]
 const BED_ANCHORS := ["bed1", "bed2"]
+
+# default floor footprint (largest x/z dim, metres) per furniture category, so a
+# fresh drop looks right before the user tweaks scale.
+const FIT_BY_CAT := {
+	"Beds": 2.0, "Sofas": 1.8, "Tables": 1.2, "Carpets": 2.2, "Shelves": 1.0,
+	"Chairs": 0.6, "Drawers": 0.9, "Doors": 1.0, "Windows": 1.2, "Lights": 0.5,
+	"Kitchen": 0.9, "Bathroom": 0.9, "Electronics": 0.6, "Miscellaneous": 0.6,
+}
 
 const PRESETS := [
 	{ "name": "Classic grid", "items": [
@@ -221,9 +230,10 @@ func _add_system(base: String) -> void:
 	_place_highlight(); _refresh_sel(); _refresh_scene()
 	_flash("เพิ่มของระบบ (" + anchor + ") — ลากไปวาง agents จะทำงานที่นั่น")
 
-func _add_at_focus(type: String, asset := "") -> void:
+func _add_at_focus(type: String, asset := "", fit := 0.0) -> void:
 	var it := { "type": type, "x": snappedf(target.x, 0.1), "z": snappedf(target.z, 0.1), "rot": 0.0, "scale": 1.0 }
 	if asset != "": it["asset"] = asset
+	if fit > 0.0: it["fit"] = fit
 	_add_item(it); sel = items.size() - 1
 	_place_highlight(); _refresh_sel(); _refresh_scene()
 	_flash("เพิ่มแล้ว — ลากเพื่อจัดวาง")
@@ -367,16 +377,21 @@ func _spawn_poster(rig2: Node3D, asset: String) -> void:
 func _spawn_model(rig2: Node3D, it: Dictionary) -> void:
 	var asset := String(it.get("asset", ""))
 	if asset == "": return
-	var ext := asset.get_extension().to_lower()
+	var path := asset
+	if path.begins_with("res://"): path = ProjectSettings.globalize_path(path)
+	var ext := path.get_extension().to_lower()
 	var scene: Node = null
 	if ext == "glb" or ext == "gltf":
 		var doc := GLTFDocument.new(); var stt := GLTFState.new()
-		if doc.append_from_file(asset, stt) == OK: scene = doc.generate_scene(stt)
+		if doc.append_from_file(path, stt) == OK: scene = doc.generate_scene(stt)
 	elif ext == "fbx":
-		var doc := FBXDocument.new(); var stt := GLTFState.new()
-		if doc.append_from_file(asset, stt) == OK: scene = doc.generate_scene(stt)
-	if scene:
+		var doc := FBXDocument.new(); var stt := FBXState.new()
+		if doc.append_from_file(path, stt) == OK: scene = doc.generate_scene(stt)
+	if scene and scene is Node3D:
 		rig2.add_child(scene)
+		# imported models come in every conceivable unit/origin — normalise to a
+		# sane footprint and drop the base onto the floor so it never floats.
+		_fit_model(scene as Node3D, float(it.get("fit", 1.1)))
 		var ap := scene.find_child("AnimationPlayer", true, false)
 		if ap and ap is AnimationPlayer:
 			var names: Array = (ap as AnimationPlayer).get_animation_list()
@@ -386,6 +401,49 @@ func _spawn_model(rig2: Node3D, it: Dictionary) -> void:
 			if not it.has("anim"): it["anim"] = chosen
 			if chosen != "" and chosen in names:
 				(ap as AnimationPlayer).play(chosen)
+
+## Scale an imported model so its largest floor dimension ≈ target metres and
+## its base rests on y=0. Works for any source unit/origin (glb OR fbx), so the
+## same code fits a user .glb import and the Low Poly furniture pack.
+func _fit_model(scene: Node3D, target: float) -> void:
+	var aabb := _node_aabb(scene, Transform3D.IDENTITY)
+	if aabb.size == Vector3.ZERO: return
+	var span: float = max(aabb.size.x, aabb.size.z)
+	if span <= 0.0001: span = max(aabb.size.y, 0.0001)
+	var f: float = target / span
+	scene.scale = Vector3(f, f, f)
+	scene.position.y = -aabb.position.y * f   # bottom of the mesh → floor
+
+## Combined mesh AABB of a node tree, expressed in `scene`-local space.
+func _node_aabb(n: Node, xform: Transform3D) -> AABB:
+	var acc := AABB(); var has := false
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh:
+		acc = xform * (n as MeshInstance3D).mesh.get_aabb(); has = true
+	for c in n.get_children():
+		var cx := xform
+		if c is Node3D: cx = xform * (c as Node3D).transform
+		var sub := _node_aabb(c, cx)
+		if sub.size != Vector3.ZERO:
+			if has: acc = acc.merge(sub)
+			else: acc = sub; has = true
+	return acc
+
+## One-time scan of the bundled Low Poly furniture pack → {category: [name…]}.
+func _scan_decor() -> Dictionary:
+	if not _decor_cache.is_empty(): return _decor_cache
+	var root := "res://assets/decor/"
+	var d := DirAccess.open(root)
+	if d == null: return _decor_cache
+	for cat in d.get_directories():
+		var sub := DirAccess.open(root + cat)
+		if sub == null: continue
+		var names: Array = []
+		for f in sub.get_files():
+			if f.to_lower().ends_with(".fbx"): names.append(f.get_basename())
+		if not names.is_empty():
+			names.sort()
+			_decor_cache[cat] = names
+	return _decor_cache
 
 # ---------------------------------------------------------------- UI
 # A brand-dark theme so the editor doesn't look like raw Godot greybox.
@@ -474,6 +532,17 @@ func _build_ui() -> void:
 		var ty: String = t[0]
 		b.pressed.connect(func(): _add_at_focus(ty))
 		vb.add_child(b)
+	# 📦 bundled Low Poly furniture — real models, auto-fitted to the floor
+	var decor := _scan_decor()
+	if not decor.is_empty():
+		var flab := Label.new(); flab.text = "📦 เฟอร์นิเจอร์ (Low Poly)"; flab.add_theme_font_size_override("font_size", 10); vb.add_child(flab)
+		var cats: Array = decor.keys(); cats.sort()
+		var cpick := OptionButton.new(); cpick.name = "DecorCat"
+		for c in cats: cpick.add_item(String(c))
+		cpick.item_selected.connect(func(i): _fill_decor(String(cats[i])))
+		vb.add_child(cpick)
+		var flist := VBoxContainer.new(); flist.name = "DecorList"; flist.add_theme_constant_override("separation", 2); vb.add_child(flist)
+		_fill_decor(String(cats[0]))
 	ui.add_child(panel)
 
 	# right top: selected item
@@ -502,6 +571,18 @@ func _build_ui() -> void:
 
 	var toast := Label.new(); toast.name = "Toast"; toast.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	toast.position = Vector2(-120, -40); ui.add_child(toast)
+
+func _fill_decor(cat: String) -> void:
+	var box := ui.find_child("DecorList", true, false)
+	if box == null: return
+	for c in box.get_children(): c.queue_free()
+	for name in _decor_cache.get(cat, []):
+		var b := Button.new(); b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.text = "＋ " + String(name); b.add_theme_font_size_override("font_size", 10)
+		var path := "res://assets/decor/%s/%s.fbx" % [cat, name]
+		var fit: float = FIT_BY_CAT.get(cat, 1.0)
+		b.pressed.connect(func(): _add_at_focus("model", path, fit))
+		box.add_child(b)
 
 func _flash(msg: String) -> void:
 	var toast := ui.find_child("Toast", true, false)
