@@ -49,6 +49,24 @@ var library: Array = []           # [{path, kind, name}]
 var _decor_cache := {}            # {category: [name…]} bundled Low Poly furniture
 var world: Node3D                 # the live grid world (room swapping)
 var _swap_pick := -1              # first slot clicked in the room-swap panel
+var ui_lang := "en"               # editor UI language (en default, th if set on this machine)
+
+## Pick the localized string. English is the default; Thai when the machine's
+## registry lang is "th".
+func L(en: String, th: String) -> String:
+	return th if ui_lang == "th" else en
+
+## Read the persisted UI language straight off the daemon's registry.json (sync,
+## so the UI builds in the right language with no async race).
+func _read_lang() -> String:
+	var p := ProjectSettings.globalize_path("res://..").path_join("daemon/registry.json")
+	if FileAccess.file_exists(p):
+		var f := FileAccess.open(p, FileAccess.READ)
+		if f:
+			var data: Variant = JSON.parse_string(f.get_as_text())
+			if data is Dictionary and data.has("lang"):
+				return String(data["lang"])
+	return "en"
 
 # pretty labels for the room kinds (mirrors grid_world ROOM_DEFS)
 const ROOM_LABELS := {
@@ -65,8 +83,8 @@ const TYPES := [
 
 # system objects bind to an agent anchor. workstation cycles desk1..desk6.
 const SYS_TYPES := [
-	["workstation", "🖥 โต๊ะทำงาน"], ["director", "⭐ โต๊ะ Director"],
-	["ceo", "👑 โต๊ะ CEO"], ["bed", "🛏 เตียง"],
+	["workstation", "🖥 โต๊ะทำงาน", "🖥 Workstation"], ["director", "⭐ โต๊ะ Director", "⭐ Director desk"],
+	["ceo", "👑 โต๊ะ CEO", "👑 CEO desk"], ["bed", "🛏 เตียง", "🛏 Bed"],
 ]
 const WORK_ANCHORS := ["desk1", "desk2", "desk3", "desk4", "desk5", "desk6"]
 const BED_ANCHORS := ["bed1", "bed2"]
@@ -109,6 +127,7 @@ func setup(camera_rig: Node3D, camera: Camera3D) -> void:
 	cam = camera
 
 func _ready() -> void:
+	ui_lang = _read_lang()
 	world = get_node_or_null("/root/OfficeFloor/World")
 	if world == null:
 		world = get_tree().get_root().find_child("World", true, false)
@@ -227,20 +246,21 @@ func _add_system(base: String) -> void:
 		"workstation":
 			for a in WORK_ANCHORS:
 				if not used.has(a): anchor = a; break
-			if anchor == "": _flash("ครบ 6 โต๊ะทำงานแล้ว"); return
+			if anchor == "": _flash(L("All 6 workstations are taken", "ครบ 6 โต๊ะทำงานแล้ว")); return
 		"director": anchor = "lead_desk"
 		"ceo": anchor = "ceo_desk"
 		"bed":
 			vis = "bed"
 			for a in BED_ANCHORS:
 				if not used.has(a): anchor = a; break
-			if anchor == "": _flash("ครบ 2 เตียงแล้ว"); return
-	if used.has(anchor): _flash("มี " + anchor + " แล้ว"); return
+			if anchor == "": _flash(L("Both beds are taken", "ครบ 2 เตียงแล้ว")); return
+	if used.has(anchor): _flash(L(anchor + " already exists", "มี " + anchor + " แล้ว")); return
 	var it := { "type": vis, "system": true, "anchor": anchor,
 		"x": snappedf(target.x, 0.1), "z": snappedf(target.z, 0.1), "rot": 0.0, "scale": 1.0 }
 	_add_item(it); sel = items.size() - 1
 	_place_highlight(); _refresh_sel(); _refresh_scene()
-	_flash("เพิ่มของระบบ (" + anchor + ") — ลากไปวาง agents จะทำงานที่นั่น")
+	_flash(L("Added system object (" + anchor + ") — drag to place; agents work there",
+		"เพิ่มของระบบ (" + anchor + ") — ลากไปวาง agents จะทำงานที่นั่น"))
 
 func _add_at_focus(type: String, asset := "", fit := 0.0) -> void:
 	var it := { "type": type, "x": snappedf(target.x, 0.1), "z": snappedf(target.z, 0.1), "rot": 0.0, "scale": 1.0 }
@@ -248,7 +268,7 @@ func _add_at_focus(type: String, asset := "", fit := 0.0) -> void:
 	if fit > 0.0: it["fit"] = fit
 	_add_item(it); sel = items.size() - 1
 	_place_highlight(); _refresh_sel(); _refresh_scene()
-	_flash("เพิ่มแล้ว — ลากเพื่อจัดวาง")
+	_flash(L("Added — drag to position", "เพิ่มแล้ว — ลากเพื่อจัดวาง"))
 
 # ---------------------------------------------------------------- highlight
 func _make_highlight() -> void:
@@ -521,14 +541,14 @@ func _build_ui() -> void:
 	var bt := Label.new(); bt.text = "🎨 EDITOR"; bh.add_child(bt)
 	bh.add_child(VSeparator.new())
 	var plab := Label.new(); plab.text = "Layout:"; plab.add_theme_font_size_override("font_size", 11); bh.add_child(plab)
-	var pbtn := OptionButton.new(); pbtn.name = "PresetPick"; pbtn.add_item("เลือก layout…")
+	var pbtn := OptionButton.new(); pbtn.name = "PresetPick"; pbtn.add_item(L("Pick layout…", "เลือก layout…"))
 	for pr in PRESETS: pbtn.add_item("⭐ " + pr["name"])
 	pbtn.item_selected.connect(_on_preset_picked); bh.add_child(pbtn)
 	bh.add_child(VSeparator.new())
 	var imp := Button.new(); imp.text = "📦 .glb"; imp.pressed.connect(_import_model); bh.add_child(imp)
 	var pst := Button.new(); pst.text = "🖼 image"; pst.pressed.connect(_import_image); bh.add_child(pst)
-	var save := Button.new(); save.text = "💾 บันทึก"; save.pressed.connect(_save); bh.add_child(save)
-	var savep := Button.new(); savep.text = "⭐ เป็น preset"; savep.pressed.connect(_save_as_preset); bh.add_child(savep)
+	var save := Button.new(); save.text = L("💾 Save", "💾 บันทึก"); save.pressed.connect(_save); bh.add_child(save)
+	var savep := Button.new(); savep.text = L("⭐ As preset", "⭐ เป็น preset"); savep.pressed.connect(_save_as_preset); bh.add_child(savep)
 	ui.add_child(bar)
 
 	# ── LEFT COLUMN — fills the left edge top-to-bottom: palette (scrolls) on
@@ -539,13 +559,13 @@ func _build_ui() -> void:
 	left.offset_left = M; left.offset_right = M + COLW; left.offset_top = 88.0; left.offset_bottom = -M
 	var lcol := VBoxContainer.new(); lcol.add_theme_constant_override("separation", 6); left.add_child(lcol)
 	# 🔀 ROOM SWAP — the jigsaw: click two rooms to trade their whole cells
-	var rlab := Label.new(); rlab.text = "🔀 จัดผังห้อง (คลิก 2 ห้อง = สลับ)"; rlab.add_theme_font_size_override("font_size", 10); lcol.add_child(rlab)
+	var rlab := Label.new(); rlab.text = L("🔀 Room layout (click 2 rooms = swap)", "🔀 จัดผังห้อง (คลิก 2 ห้อง = สลับ)"); rlab.add_theme_font_size_override("font_size", 10); lcol.add_child(rlab)
 	var rgrid := GridContainer.new(); rgrid.name = "RoomGrid"; rgrid.columns = 3
 	rgrid.add_theme_constant_override("h_separation", 3); rgrid.add_theme_constant_override("v_separation", 3)
 	lcol.add_child(rgrid)
 	lcol.add_child(HSeparator.new())
-	var title := Label.new(); title.text = "＋ เพิ่มวัตถุ"; lcol.add_child(title)
-	var hint := Label.new(); hint.text = "ลากซ้าย=เลื่อนกล้อง · คลิกวัตถุ=เลือก · ลาก=ย้าย · คลิกขวา=หมุน · ล้อ=ซูม"
+	var title := Label.new(); title.text = L("＋ Add object", "＋ เพิ่มวัตถุ"); lcol.add_child(title)
+	var hint := Label.new(); hint.text = L("L-drag=pan · click=select · drag=move · R-drag=rotate · wheel=zoom", "ลากซ้าย=เลื่อนกล้อง · คลิกวัตถุ=เลือก · ลาก=ย้าย · คลิกขวา=หมุน · ล้อ=ซูม")
 	hint.add_theme_font_size_override("font_size", 9); hint.autowrap_mode = TextServer.AUTOWRAP_WORD; lcol.add_child(hint)
 	# palette scroll grows to fill the space above the library
 	var sc := ScrollContainer.new(); sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -553,13 +573,13 @@ func _build_ui() -> void:
 	var vb := VBoxContainer.new(); vb.add_theme_constant_override("separation", 4)
 	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL; sc.add_child(vb)
 	# 🔵 system objects — bound to an agent anchor; moving one makes agents work there
-	var syslab := Label.new(); syslab.text = "🔵 ของระบบ (agents ใช้)"; syslab.add_theme_font_size_override("font_size", 10); vb.add_child(syslab)
+	var syslab := Label.new(); syslab.text = L("🔵 System (agents use)", "🔵 ของระบบ (agents ใช้)"); syslab.add_theme_font_size_override("font_size", 10); vb.add_child(syslab)
 	for s in SYS_TYPES:
-		var b := Button.new(); b.text = "＋ " + s[1]; b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		var b := Button.new(); b.text = "＋ " + L(s[2], s[1]); b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		var base: String = s[0]
 		b.pressed.connect(func(): _add_system(base))
 		vb.add_child(b)
-	var catlab := Label.new(); catlab.text = "🟢 ของตกแต่ง (ขยับได้อิสระ)"; catlab.add_theme_font_size_override("font_size", 10); vb.add_child(catlab)
+	var catlab := Label.new(); catlab.text = L("🟢 Decor (free to move)", "🟢 ของตกแต่ง (ขยับได้อิสระ)"); catlab.add_theme_font_size_override("font_size", 10); vb.add_child(catlab)
 	for t in TYPES:
 		var b := Button.new(); b.text = "＋ " + t[1]; b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		var ty: String = t[0]
@@ -568,7 +588,7 @@ func _build_ui() -> void:
 	# 📦 bundled Low Poly furniture — real models, auto-fitted to the floor
 	var decor := _scan_decor()
 	if not decor.is_empty():
-		var flab := Label.new(); flab.text = "📦 เฟอร์นิเจอร์ (Low Poly)"; flab.add_theme_font_size_override("font_size", 10); vb.add_child(flab)
+		var flab := Label.new(); flab.text = L("📦 Furniture (Low Poly)", "📦 เฟอร์นิเจอร์ (Low Poly)"); flab.add_theme_font_size_override("font_size", 10); vb.add_child(flab)
 		var cats: Array = decor.keys(); cats.sort()
 		var cpick := OptionButton.new(); cpick.name = "DecorCat"
 		for c in cats: cpick.add_item(String(c))
@@ -578,7 +598,7 @@ func _build_ui() -> void:
 		_fill_decor(String(cats[0]))
 	# LIBRARY pinned to the bottom of the left column
 	lcol.add_child(HSeparator.new())
-	var ll := Label.new(); ll.text = "🗃 LIBRARY — โมเดล/รูปที่ import"; ll.add_theme_font_size_override("font_size", 11); lcol.add_child(ll)
+	var ll := Label.new(); ll.text = L("🗃 LIBRARY — imported models/images", "🗃 LIBRARY — โมเดล/รูปที่ import"); ll.add_theme_font_size_override("font_size", 11); lcol.add_child(ll)
 	var lsc := ScrollContainer.new(); lsc.custom_minimum_size = Vector2(0, 132)
 	lsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; lcol.add_child(lsc)
 	var llist := VBoxContainer.new(); llist.name = "LibList"; llist.size_flags_horizontal = Control.SIZE_EXPAND_FILL; lsc.add_child(llist)
@@ -594,7 +614,7 @@ func _build_ui() -> void:
 	var sv := VBoxContainer.new(); sv.name = "SelBox"; sv.add_theme_constant_override("separation", 5); selWrap.add_child(sv)
 	rcol.add_child(selWrap); selWrap.visible = false
 	rcol.add_child(HSeparator.new())
-	var scl := Label.new(); scl.text = "🗂 SCENE — วัตถุที่วาง"; rcol.add_child(scl)
+	var scl := Label.new(); scl.text = L("🗂 SCENE — placed objects", "🗂 SCENE — วัตถุที่วาง"); rcol.add_child(scl)
 	var ssc := ScrollContainer.new(); ssc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	ssc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; rcol.add_child(ssc)
 	var slist := VBoxContainer.new(); slist.name = "SceneList"; slist.size_flags_horizontal = Control.SIZE_EXPAND_FILL; ssc.add_child(slist)
@@ -631,17 +651,17 @@ func _refresh_sel() -> void:
 	var lbl := Label.new(); lbl.text = "⚙ " + String(it.get("type", "")); sv.add_child(lbl)
 	# stepper rows (sliders were invisible on the dark theme) — clear value + buttons
 	var apply_rot := func(v): it["rot"] = wrapf(v, 0.0, 360.0); items[sel]["node"].rotation_degrees.y = it["rot"]; _refresh_sel()
-	sv.add_child(_stepper("หมุน", "%d°" % int(it.get("rot", 0)),
+	sv.add_child(_stepper(L("Rotate", "หมุน"), "%d°" % int(it.get("rot", 0)),
 		func(): apply_rot.call(float(it.get("rot", 0)) - 15.0),
 		func(): apply_rot.call(float(it.get("rot", 0)) + 15.0)))
 	var apply_scl := func(v): it["scale"] = clampf(v, 0.3, 4.0); items[sel]["node"].scale = Vector3(it["scale"], it["scale"], it["scale"]); _place_highlight(); _refresh_sel()
-	sv.add_child(_stepper("ขนาด", "%.1f" % float(it.get("scale", 1.0)),
+	sv.add_child(_stepper(L("Size", "ขนาด"), "%.1f" % float(it.get("scale", 1.0)),
 		func(): apply_scl.call(float(it.get("scale", 1.0)) - 0.1),
 		func(): apply_scl.call(float(it.get("scale", 1.0)) + 0.1)))
 	# imported-model animation picker — choose which clip plays for THIS item
 	if String(it.get("type", "")) == "model" and it.get("anims") is Array and (it["anims"] as Array).size() > 0:
 		var al := Label.new(); al.text = "🎬 Animation"; sv.add_child(al)
-		var ab := OptionButton.new(); ab.add_item("(ไม่เล่น)")
+		var ab := OptionButton.new(); ab.add_item(L("(none)", "(ไม่เล่น)"))
 		var names: Array = it["anims"]
 		for i in names.size(): ab.add_item(String(names[i]))
 		var chosen := String(it.get("anim", ""))
@@ -650,7 +670,7 @@ func _refresh_sel() -> void:
 			it["anim"] = "" if i == 0 else String(names[i - 1])
 			_respawn(sel))
 		sv.add_child(ab)
-	var del := Button.new(); del.text = "🗑 ลบวัตถุนี้"
+	var del := Button.new(); del.text = L("🗑 Delete this", "🗑 ลบวัตถุนี้")
 	del.pressed.connect(func():
 		items[sel]["node"].queue_free(); items.remove_at(sel); sel = -1
 		_place_highlight(); _refresh_sel(); _refresh_scene()); sv.add_child(del)
@@ -698,12 +718,12 @@ func _refresh_rooms() -> void:
 func _on_room_click(slot: int) -> void:
 	if world == null: return
 	if _swap_pick < 0:
-		_swap_pick = slot; _flash("เลือกห้องแรก — คลิกอีกห้องเพื่อสลับ")
+		_swap_pick = slot; _flash(L("Picked first room — click another to swap", "เลือกห้องแรก — คลิกอีกห้องเพื่อสลับ"))
 	elif _swap_pick == slot:
-		_swap_pick = -1; _flash("ยกเลิก")
+		_swap_pick = -1; _flash(L("Cancelled", "ยกเลิก"))
 	else:
 		world.swap_cells(_swap_pick, slot); _swap_pick = -1
-		_flash("🔀 สลับห้องแล้ว — กด 💾 บันทึก ให้วอลเปเปอร์จำ")
+		_flash(L("🔀 Rooms swapped — press 💾 Save to keep it", "🔀 สลับห้องแล้ว — กด 💾 บันทึก ให้วอลเปเปอร์จำ"))
 	_refresh_rooms()
 
 func _refresh_scene() -> void:
@@ -723,7 +743,7 @@ func _refresh_lib() -> void:
 	if box == null: return
 	for c in box.get_children(): c.queue_free()
 	if library.is_empty():
-		var e := Label.new(); e.text = "(ว่าง — กด Import)"; e.add_theme_font_size_override("font_size", 10); box.add_child(e); return
+		var e := Label.new(); e.text = L("(empty — use Import)", "(ว่าง — กด Import)"); e.add_theme_font_size_override("font_size", 10); box.add_child(e); return
 	for a in library:
 		var row := HBoxContainer.new()
 		var b := Button.new(); b.alignment = HORIZONTAL_ALIGNMENT_LEFT; b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -751,7 +771,7 @@ func _load_preset(pr: Dictionary) -> void:
 	for it in pr.get("items", []):
 		if it is Dictionary: _add_item(it.duplicate(true))
 	_refresh_sel(); _refresh_scene()
-	_flash("⭐ โหลด: " + String(pr.get("name", "")))
+	_flash(L("⭐ Loaded: ", "⭐ โหลด: ") + String(pr.get("name", "")))
 
 func _current_items() -> Array:
 	var out: Array = []
@@ -762,17 +782,17 @@ func _save() -> void:
 	var payload := { "items": _current_items() }
 	if world and world.has_method("get_room_order"): payload["rooms"] = world.get_room_order()
 	_save_req.request(LAYOUT_URL, ["content-type: application/json"], HTTPClient.METHOD_POST, JSON.stringify(payload))
-	_flash("💾 บันทึกแล้ว — วอลเปเปอร์อัปเดต")
+	_flash(L("💾 Saved — wallpaper updated", "💾 บันทึกแล้ว — วอลเปเปอร์อัปเดต"))
 
 func _save_as_preset() -> void:
-	var dlg := AcceptDialog.new(); dlg.title = "บันทึกเป็น preset"
-	var le := LineEdit.new(); le.placeholder_text = "ชื่อ preset"; le.custom_minimum_size = Vector2(260, 0)
+	var dlg := AcceptDialog.new(); dlg.title = L("Save as preset", "บันทึกเป็น preset")
+	var le := LineEdit.new(); le.placeholder_text = L("preset name", "ชื่อ preset"); le.custom_minimum_size = Vector2(260, 0)
 	dlg.add_child(le); dlg.register_text_enter(le); add_child(dlg)
 	dlg.confirmed.connect(func():
 		var nm := le.text.strip_edges()
 		if nm != "":
 			_save_req.request(PRESETS_URL, ["content-type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({ "name": nm, "items": _current_items() }))
-			_flash("⭐ บันทึก preset: " + nm)
+			_flash(L("⭐ Saved preset: ", "⭐ บันทึก preset: ") + nm)
 			_preset_req.request(PRESETS_URL)
 		dlg.queue_free())
 	dlg.canceled.connect(func(): dlg.queue_free())
