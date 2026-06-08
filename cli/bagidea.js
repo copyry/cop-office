@@ -95,6 +95,7 @@ function help() {
   row("editor", "Open the 3D Office Editor");
   row("jobs", "Scheduled / recurring agent jobs");
   row("proposals", "Team project pitches awaiting a verdict");
+  row("proposal show <id>", "Read a pitch in full");
   row("proposal <approve|reject> <id>", "Decide on a pitch");
   row("memory <agent>", "Read an agent's memory");
   row("office", "Read OFFICE.md (shared brief)");
@@ -454,15 +455,28 @@ async function main() {
       console.log(`  ${c.warn}💡${c.reset} ${c.bold}${p.name}${c.reset} ${c.gray}#${p.id} · ${(p.agents || []).join(", ")}${c.reset}`);
       if (p.detail) console.log(`     ${c.gray}${String(p.detail).slice(0, 100)}${c.reset}`);
     }
-    info("\n  Decide: bagidea proposal <approve|reject> <id>");
+    info("\n  Read: bagidea proposal show <id>   ·   Decide: proposal <approve|reject> <id>");
     return;
   }
 
   if (cmd === "proposal") {
     const sub = rest[0];
     const id = rest[1];
+    if (sub === "show" || sub === "view") {
+      if (!id) return info("Usage: bagidea proposal show <id>");
+      const r = await req("GET", "/proposals");
+      const p = (r.proposals || []).find((x) => String(x.id) === String(id));
+      if (!p) return bad(`No proposal #${id} — see ${c.accent}bagidea proposals${c.reset}`);
+      console.log(`\n  ${c.warn}💡 ${c.bold}${p.name}${c.reset}`);
+      console.log(`  ${c.gray}#${p.id} · by ${(p.agents || []).join(", ")} · ${p.status || "pending"}${c.reset}`);
+      rule();
+      console.log("  " + String(p.detail || "(no detail)").replace(/\n/g, "\n  "));
+      rule();
+      info("Decide: bagidea proposal approve " + p.id + "  |  reject " + p.id);
+      return;
+    }
     if (!["approve", "reject"].includes(sub) || !id)
-      return info("Usage: bagidea proposal <approve|reject> <id>");
+      return info("Usage: bagidea proposal <show|approve|reject> <id>");
     await req("POST", "/proposals/respond", { id, decision: sub });
     return ok(sub === "approve"
       ? `Approved #${id} — a project is being created and staffed 🎉`
