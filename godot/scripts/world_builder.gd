@@ -10,7 +10,7 @@ const SCREEN_SHADER := preload("res://shaders/screen_code.gdshader")
 const FLOOR_SHADER := preload("res://shaders/floor_planks.gdshader")
 const GRASS_SHADER := preload("res://shaders/grass_blade.gdshader")
 
-const WP := {
+var WP := {
 	"exec_c": Vector3(-6, 0.86, -6),
 	"ceo_desk": Vector3(-6, 0.86, -6.9),     # in FRONT of the console, not in it
 	"lead_desk": Vector3(-3.2, 0.86, -7.8),  # the Director's own workstation
@@ -107,6 +107,8 @@ const BOARD_COLORS := {
 }
 
 var astar := AStar3D.new()
+var _grid: Node3D            # the swappable room-grid (owns geometry, anchors, A* graph)
+const GRID_SCRIPT := preload("res://scripts/grid_world.gd")
 var _ops_nodes: Array = []   # baked ops-desk visuals (hideable when the editor supplies custom workstations)
 
 var _anchor_override := {}   # name → moved position (WP is const/immutable)
@@ -360,7 +362,6 @@ func _kit_architecture() -> void:
 	_kit_floor("Floor_Metal_Square", Vector3(9.5, 0, 9.5), 12.6, 6.6, 4, 2, Color(0.78, 0.82, 0.98)) # dorm-xl
 
 func _ready() -> void:
-	_build_graph()
 	_build_geometry()
 	_build_ghost_deck()
 	_build_garden_lamps()
@@ -1080,6 +1081,41 @@ func _bookshelf(pos: Vector3) -> void:
 # ---------------------------------------------------------------- geometry
 
 func _build_geometry() -> void:
+	# ── Data-driven swappable room grid (replaces the hand-built floor) ──────
+	# sky + countryside kept from the original art
+	sky_mat = _mat(Color(0.55, 0.75, 1.0), 1.0, Color(0.55, 0.72, 1.0), 1.6)
+	sky_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_box(Vector3(0, 7, -34.0), Vector3(110, 30, 0.1), sky_mat, 0)
+	_build_countryside()
+	# the grid owns rooms, furniture, agent anchors and the A* graph
+	_grid = GRID_SCRIPT.new()
+	add_child(_grid)
+	# share its navigation so path_to / path_between / set_anchor work unchanged
+	astar = _grid.astar
+	_wp_ids = _grid._wp_ids
+	WP = _grid.WP
+	# brand billboard above the grid
+	_billboard(Vector3(0, 4.6, -13.0), -18.0)
+	# mission-control board on the OPS slot's north wall
+	_board_x = 0.0; _board_z = -11.6; _board_y0 = 1.7
+	var mctl := _label("MISSION CONTROL", Vector3(0.0, 2.2, -11.7), 44, Color(0.6, 0.85, 1.0))
+	mctl.pixel_size = 0.0035
+	# recreation life: office cat (or fallback dog) + football, in the rec slot
+	var _catg := load("res://scripts/cat_sprite.gd")
+	pet = Sprite3D.new()
+	if _catg.has_assets():
+		pet.set_script(_catg); pet.position = Vector3(-8, 0.14, 8)
+	else:
+		pet.set_script(load("res://scripts/dog_sprite.gd")); pet.position = Vector3(-8, 0.27, 8)
+	add_child(pet)
+	ball = CSGSphere3D.new(); ball.radius = 0.2
+	var _ballg := StandardMaterial3D.new()
+	_ballg.albedo_texture = _soccer_texture(); _ballg.roughness = 0.35
+	ball.material = _ballg; ball.set_script(load("res://scripts/rec_ball.gd"))
+	add_child(ball); ball.position = Vector3(-7, 0.2, 8)
+	_build_tv_glow()
+	return
+	# ── legacy hand-built floor below — unreachable, kept for reference ──────
 	var wall := _mat(Color(0.18, 0.18, 0.25), 0.9)
 	var wood := _mat(Color(0.26, 0.18, 0.12), 0.5)
 	var dark_wood := _mat(Color(0.15, 0.1, 0.07), 0.45)
