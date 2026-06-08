@@ -2571,8 +2571,12 @@ const server = http.createServer((req, res) => {
         if (!req.headers["x-bagidea-ui"]) { res.writeHead(403); return res.end("human UI only"); }
         const id = String(JSON.parse(body).id || "").replace(/[^\w-]/g, "");
         const dir = path.join(__dirname, "..", "plugins", id);
-        if (id === "music") throw new Error("plugin หลักลบไม่ได้");
-        if (!fs.existsSync(path.join(dir, "plugin.json"))) throw new Error("ไม่พบ plugin");
+        const manFile = path.join(dir, "plugin.json");
+        if (!fs.existsSync(manFile)) throw new Error("ไม่พบ plugin");
+        // Core plugins ship with the office and can't be uninstalled; only
+        // plugins the user added (e.g. via GitHub) are removable.
+        let man = {}; try { man = JSON.parse(fs.readFileSync(manFile, "utf8")); } catch {}
+        if (man.core) throw new Error("plugin หลักลบไม่ได้");
         fs.rmSync(dir, { recursive: true, force: true });
         plugins.load();
         broadcast({ type: "plugins.changed" }, false);

@@ -133,6 +133,7 @@ module.exports = function initPlugins(ctx) {
       id: p.manifest.id, name: p.manifest.name, version: p.manifest.version,
       description: p.manifest.description, panel: !!p.manifest.panel,
       commands: p.manifest.commands || [], needsKeys: p.manifest.needsKeys || [],
+      core: !!p.manifest.core,
     }));
   }
 

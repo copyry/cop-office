@@ -14,5 +14,6 @@
     { "name": "remove", "args": "<ชื่อเพลง/หมายเลข>", "desc": "ลบเพลงออกจากเพลย์ลิสต์" },
     { "name": "status", "args": "", "desc": "ดูว่ากำลังเล่นอะไร" }
   ],
-  "needsKeys": []
+  "needsKeys": [],
+  "core": true
 }

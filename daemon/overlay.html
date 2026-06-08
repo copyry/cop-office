@@ -2579,7 +2579,8 @@
           <span>${(p.description || "").replace(/</g, "&lt;")} · v${p.version || "?"}` +
         (p.commands.length ? ` · ${p.commands.length} คำสั่ง` : "") + `</span></div>` +
         (p.panel ? `<div class="winbtn" title="เปิดแผง">▶</div>` : "") +
-        (p.id !== "music" ? `<div class="winbtn hide" title="ถอนการติดตั้ง">🗑</div>` : "");
+        (p.core ? `<span class="hide" title="plugin หลัก ลบไม่ได้" style="opacity:.5;font-size:13px;align-self:center">🔒</span>`
+                : `<div class="winbtn hide" title="ถอนการติดตั้ง">🗑</div>`);
       const btns = row.querySelectorAll(".winbtn");
       if (p.panel) btns[0].onclick = () => openPluginPanel(p);
       else if (!btns.length) row.style.cursor = "default";
