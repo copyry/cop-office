@@ -45,6 +45,19 @@ func _ready() -> void:
 	t.timeout.connect(_stream_positions)
 	add_child(t)
 
+## Rooms were rearranged (jigsaw swap) → drop everyone back onto their home
+## anchor so they stand in the correct room. Normal walking resumes after.
+func resnap_agents() -> void:
+	if not is_instance_valid(world): return
+	for id in agents:
+		var a: Dictionary = agents[id]
+		if not is_instance_valid(a.node): continue
+		var home: String = String(a.get("desk", ""))
+		if home == "" or not world.WP.has(home): home = "ops_c"
+		if world.WP.has(home): a.node.teleport(world.WP[home])
+	if is_instance_valid(ceo) and world.WP.has("ceo_desk"):
+		ceo.teleport(world.WP["ceo_desk"])
+
 func _stream_positions() -> void:
 	if _pos_busy:
 		return

@@ -124,6 +124,13 @@ func set_anchor(name: String, pos: Vector3) -> void:
 ## Swap two grid rooms (jigsaw). Editor + wallpaper both call this.
 func swap_cells(a: int, b: int) -> void:
 	if _grid: _grid.swap_slots(a, b)
+	_resnap_agents()
+
+## After rooms move, drop characters back onto their (now-relocated) anchors.
+func _resnap_agents() -> void:
+	var am := get_parent().get_node_or_null("AgentManager")
+	if am and am.has_method("resnap_agents"):
+		am.resnap_agents()
 
 ## Current room kind per slot (for the editor UI + saving to layout.json).
 func get_room_order() -> Array:
@@ -144,6 +151,7 @@ func apply_room_order(target: Array) -> void:
 		for j in range(i + 1, _grid.room_order.size()):
 			if _grid.room_order[j] == target[i]:
 				_grid.swap_slots(i, j); break
+	_resnap_agents()
 
 ## Hide/show the baked ops desks (used when a custom layout provides its own
 ## work desks so they don't double up).

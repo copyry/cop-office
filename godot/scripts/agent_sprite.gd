@@ -396,6 +396,15 @@ func set_state(state: String) -> void:
 
 ## Walk through waypoints (straight tween legs along the A* graph).
 ## Returns the total walk duration in seconds.
+## Cancel any walk and jump to a spot — used when the room grid is rearranged
+## (jigsaw swap) so characters land in the right room immediately.
+func teleport(pos: Vector3) -> void:
+	follow_node = null
+	if _walk_tween:
+		_walk_tween.kill()
+	_walking = false
+	position = pos
+
 func walk_to(points: Array) -> float:
 	if points.is_empty():
 		return 0.0
