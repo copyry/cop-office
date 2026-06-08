@@ -53,8 +53,13 @@ var ui_lang := "en"               # editor UI language (en default, th if set on
 var _ui_layer: CanvasLayer        # so we can rebuild the whole UI on a language switch
 var _billboard_path := ""         # user-uploaded billboard image (persisted in layout)
 
-# the office's four languages (mirrors overlay.html LANGS)
-const LANGS := [["en", "🇬🇧 EN"], ["th", "🇹🇭 ไทย"], ["zh", "🇨🇳 中文"], ["ja", "🇯🇵 日本語"]]
+# the office languages (mirrors overlay.html LANGS). The editor UI ships full
+# translations for en/th/zh/ja and falls back to English for the rest; the
+# overlay auto-translates every language via the daemon's /i18n endpoint.
+const LANGS := [["en", "🇬🇧 EN"], ["zh", "🇨🇳 中文"], ["es", "🇪🇸 Español"], ["hi", "🇮🇳 हिन्दी"],
+	["ar", "🇸🇦 العربية"], ["pt", "🇧🇷 Português"], ["ru", "🇷🇺 Русский"], ["ja", "🇯🇵 日本語"],
+	["de", "🇩🇪 Deutsch"], ["fr", "🇫🇷 Français"], ["ko", "🇰🇷 한국어"], ["id", "🇮🇩 Indonesia"],
+	["vi", "🇻🇳 Tiếng Việt"], ["th", "🇹🇭 ไทย"]]
 
 ## Pick the localized string. English is the default; th passed inline, zh/ja
 ## looked up by the English key so existing L(en, th) call sites need no change.

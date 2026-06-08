@@ -815,7 +815,12 @@
   // full-string matches translate, so agent names / user content are never
   // touched. Default = English; this machine pins Thai. Missing entries fall
   // back to the Thai source (never blank).
-  const LANGS = [["en", "🇬🇧 English"], ["th", "🇹🇭 ไทย"], ["zh", "🇨🇳 中文"], ["ja", "🇯🇵 日本語"]];
+  const LANGS = [
+    ["en", "🇬🇧 English"], ["zh", "🇨🇳 中文"], ["es", "🇪🇸 Español"], ["hi", "🇮🇳 हिन्दी"],
+    ["ar", "🇸🇦 العربية"], ["pt", "🇧🇷 Português"], ["ru", "🇷🇺 Русский"], ["ja", "🇯🇵 日本語"],
+    ["de", "🇩🇪 Deutsch"], ["fr", "🇫🇷 Français"], ["ko", "🇰🇷 한국어"], ["id", "🇮🇩 Indonesia"],
+    ["vi", "🇻🇳 Tiếng Việt"], ["th", "🇹🇭 ไทย"],
+  ];
   // DICT["thai"] = { en, zh, ja }
   const DICT = {
     "ยกเลิก": { en: "Cancel", zh: "取消", ja: "キャンセル" },

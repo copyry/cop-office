@@ -2779,7 +2779,9 @@ const server = http.createServer((req, res) => {
         if (!gm) { res.writeHead(200, { "content-type": "application/json" });
           return res.end(JSON.stringify({ map: {}, err: "no GEMINI_API_KEY" })); }
         const langName = { en: "English", zh: "Simplified Chinese", ja: "Japanese",
-          ko: "Korean", es: "Spanish", fr: "French", de: "German" }[L] || L;
+          ko: "Korean", es: "Spanish", fr: "French", de: "German", hi: "Hindi",
+          ar: "Arabic", pt: "Portuguese", ru: "Russian", id: "Indonesian",
+          vi: "Vietnamese" }[L] || L;
         // batch in chunks to keep prompts sane
         const chunks = [];
         for (let i = 0; i < missing.length; i += 60) chunks.push(missing.slice(i, i + 60));

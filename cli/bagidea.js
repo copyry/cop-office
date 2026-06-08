@@ -106,7 +106,7 @@ function help() {
   row('image "<prompt>"', "Generate an AI image → file path");
 
   head("Configure");
-  row("lang [en|th|zh|ja]", "Show / set the office language");
+  row("lang [code]", "Show / set the office language (14 languages)");
   row("keys", "List configured API keys (values hidden)");
   row("key set <NAME> <value>", "Add a key · key rm <NAME> · key test [NAME]");
   row("channels", "Telegram / Discord / LINE status");
@@ -390,16 +390,19 @@ async function main() {
   }
 
   if (cmd === "lang") {
-    const langs = { en: "🇬🇧 English", th: "🇹🇭 ไทย", zh: "🇨🇳 中文", ja: "🇯🇵 日本語" };
+    const langs = { en: "🇬🇧 English", zh: "🇨🇳 中文", es: "🇪🇸 Español", hi: "🇮🇳 हिन्दी",
+      ar: "🇸🇦 العربية", pt: "🇧🇷 Português", ru: "🇷🇺 Русский", ja: "🇯🇵 日本語",
+      de: "🇩🇪 Deutsch", fr: "🇫🇷 Français", ko: "🇰🇷 한국어", id: "🇮🇩 Indonesia",
+      vi: "🇻🇳 Tiếng Việt", th: "🇹🇭 ไทย" };
     const code = (rest[0] || "").toLowerCase();
     if (!code) {
       const reg = await req("GET", "/registry");
       const cur = reg.lang || "en";
       console.log(`\n  Office language: ${c.bold}${langs[cur] || cur}${c.reset}`);
-      info("Change with: bagidea lang <en|th|zh|ja>");
+      info("Change with: bagidea lang <code>  —  " + Object.keys(langs).join(", "));
       return;
     }
-    if (!langs[code]) return bad("Unknown language — choose: en, th, zh, ja");
+    if (!langs[code]) return bad("Unknown language. Available: " + Object.keys(langs).join(", "));
     await req("POST", "/registry/lang", { lang: code });
     return ok(`Office language set to ${c.bold}${langs[code]}${c.reset}`);
   }
