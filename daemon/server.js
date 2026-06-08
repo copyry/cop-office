@@ -2634,7 +2634,7 @@ const server = http.createServer((req, res) => {
   } else if (req.method === "POST" && req.url === "/registry/lang") {
     readBody(req, (body) => {
       try {
-        reg.lang = String(JSON.parse(body).lang || "en").slice(0, 5);
+        reg.lang = String(JSON.parse(body).lang || "en").slice(0, 5).toLowerCase();
         saveReg();
         pushRoster();
         res.writeHead(200); res.end("ok");

@@ -67,6 +67,13 @@
   }
   #dayMenu { top: 46px; right: 12px; }
   #moreMenu { top: 46px; right: 12px; min-width: 180px; }
+  #langMenu { top: 46px; right: 12px; min-width: 150px; }
+  #langMenu.open { display: block; }
+  #langMenu .opt { display: flex; gap: 9px; align-items: center; cursor: pointer;
+    padding: 8px 12px; border-radius: 8px; font-size: 12.5px; white-space: nowrap; }
+  #langMenu .opt:hover { background: rgba(94,200,255,0.12); }
+  #langMenu .opt.active { color: var(--accent); font-weight: 700; }
+  body.feedmode #langMenu { display: none !important; }
   #sessMenu { bottom: 60px; right: 12px; min-width: 250px; max-height: 290px; overflow-y: auto; }
   #dayMenu.open, #sessMenu.open, #moreMenu.open { display: block; }
   body.feedmode #moreMenu { display: none !important; }
@@ -355,10 +362,12 @@
   .edchip { font-size: 11px; padding: 4px 9px; border-radius: 8px; cursor: pointer;
     border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: #cfe3ff; }
   .edchip.on { border-color: var(--accent); color: var(--accent); background: rgba(94,200,255,0.12); }
-  .edgrid { position: relative; width: 100%; height: 300px; border-radius: 10px;
-    background: repeating-linear-gradient(0deg, #0e1626 0 19px, #101a2c 19px 20px),
-                repeating-linear-gradient(90deg, #0e1626 0 19px, #101a2c 19px 20px);
+  .edgrid { position: relative; width: 100%; height: 320px; border-radius: 10px;
+    background-color: #0a1018; background-size: cover; background-position: center;
     border: 1px solid var(--line); overflow: hidden; cursor: crosshair; }
+  .edgrid::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent 0 31px, rgba(255,255,255,0.05) 31px 32px),
+                repeating-linear-gradient(90deg, transparent 0 31px, rgba(255,255,255,0.05) 31px 32px); }
   .editem { position: absolute; font-size: 17px; cursor: grab; line-height: 1;
     filter: drop-shadow(0 1px 2px #000); }
   .editem.sel { outline: 2px solid var(--accent); border-radius: 6px; background: rgba(94,200,255,0.2); }
@@ -702,7 +711,9 @@
   <div class="opt" id="discussBtn">🗣 <span>ประชุม agents</span></div>
   <div class="opt" id="mapBtn">🗺 <span>แผนที่</span></div>
   <div class="opt" id="dayBtn">🌗 <span>บรรยากาศ</span></div>
+  <div class="opt" id="langBtn">🌐 <span>ภาษา / Language</span></div>
 </div>
+<div id="langMenu"></div>
 
 <!-- 🔵 live work strip: every running task, front and center -->
 <div id="nowStrip"></div>
@@ -794,52 +805,139 @@
       body: JSON.stringify({ type: "ui.error", agent: "overlay", text: `${m} @${l}:${c}` }) });
 
   // ---- 🌐 i18n -------------------------------------------------------------
-  // The source strings in this file are THAI; t() returns them untouched when
-  // the language is Thai, and looks up an English (or other) translation
-  // otherwise. Default language is English for everyone EXCEPT a machine that
-  // pinned 'th' in localStorage (the owner's). Missing keys fall back to the
-  // Thai source, so the UI is never blank while translations fill in.
-  const I18N = {
-    en: {
-      "PLUGINS": "PLUGINS",
-      "ส่วนขยายของออฟฟิศ — คลิกเพื่อเปิดแผง · agents สั่งงาน plugin เหล่านี้ได้":
-        "Office extensions — click to open a panel · agents can drive these plugins",
-      "เพิ่ม plugin: วางโฟลเดอร์ใน": "Add a plugin: drop a folder in",
-      "แล้วกด": "then press",
-      "ดูวิธีเขียนใน docs/guide/plugins.md": "see docs/guide/plugins.md to author one",
-      "โหลด plugins ใหม่": "Reload plugins",
-      "ยังไม่มี plugin": "No plugins yet",
-      "คำสั่ง": "commands",
-      "เปิดแผง": "Open panel",
-      "กลับ": "Back",
-      "เปิด": "Open",
-      "ปิด": "Close",
-      "บันทึก": "Save",
-      "ลบ": "Delete",
-      "ทดสอบ": "Test",
-      "ยกเลิก": "Cancel",
-      "ภาษา": "Language",
-      "🎨 จัดออฟฟิศ (Editor)": "🎨 Office Editor",
-      "วางเฟอร์นิเจอร์ · กำแพง · ของตกแต่ง — แล้วบันทึก":
-        "Place furniture · walls · decor — then save",
-      "เพิ่ม": "Add", "ล้างทั้งหมด": "Clear all", "บันทึกผัง": "Save layout",
-      "เลือกของที่จะวาง": "Pick an item to place",
-      "คลิกบนผังเพื่อวาง · ลากเพื่อย้าย · ดับเบิลคลิกเพื่อลบ":
-        "Click the grid to place · drag to move · double-click to remove",
-    },
+  // The whole UI is authored in THAI. Rather than wrap every string, a DOM
+  // walker translates Thai → the chosen language at runtime (text nodes +
+  // placeholder/title attrs), and a MutationObserver re-translates anything
+  // rendered later. Dictionary keyed by the exact Thai source string; only
+  // full-string matches translate, so agent names / user content are never
+  // touched. Default = English; this machine pins Thai. Missing entries fall
+  // back to the Thai source (never blank).
+  const LANGS = [["en", "🇬🇧 English"], ["th", "🇹🇭 ไทย"], ["zh", "🇨🇳 中文"], ["ja", "🇯🇵 日本語"]];
+  // DICT["thai"] = { en, zh, ja }
+  const DICT = {
+    "ยกเลิก": { en: "Cancel", zh: "取消", ja: "キャンセル" },
+    "✓ เลือกโฟลเดอร์นี้": { en: "✓ Choose this folder", zh: "✓ 选择此文件夹", ja: "✓ このフォルダを選択" },
+    "เพิ่มเติม": { en: "More", zh: "更多", ja: "その他" },
+    "🧩 Plugins": { en: "🧩 Plugins", zh: "🧩 插件", ja: "🧩 プラグイン" },
+    "Plugins": { en: "Plugins", zh: "插件", ja: "プラグイン" },
+    "จัดออฟฟิศ": { en: "Edit office", zh: "布置办公室", ja: "オフィス編集" },
+    "ประชุม agents": { en: "Agent meeting", zh: "代理会议", ja: "エージェント会議" },
+    "แผนที่": { en: "Map", zh: "地图", ja: "マップ" },
+    "บรรยากาศ": { en: "Atmosphere", zh: "氛围", ja: "雰囲気" },
+    "ภาษา": { en: "Language", zh: "语言", ja: "言語" },
+    // daylight
+    "🔄 AUTO — ตามเวลาเครื่อง": { en: "🔄 AUTO — follow clock", zh: "🔄 自动 — 跟随时钟", ja: "🔄 自動 — 時計に従う" },
+    "🌅 เช้าตรู่": { en: "🌅 Dawn", zh: "🌅 黎明", ja: "🌅 早朝" },
+    "☀️ กลางวัน": { en: "☀️ Daytime", zh: "☀️ 白天", ja: "☀️ 昼" },
+    "🌇 เย็น": { en: "🌇 Evening", zh: "🌇 傍晚", ja: "🌇 夕方" },
+    "🌙 กลางคืน": { en: "🌙 Night", zh: "🌙 夜", ja: "🌙 夜" },
+    // footer / feed
+    "📡 OFFICE FEED": { en: "📡 OFFICE FEED", zh: "📡 办公室动态", ja: "📡 オフィスフィード" },
+    "🧹 ล้าง": { en: "🧹 Clear", zh: "🧹 清除", ja: "🧹 クリア" },
+    "— เงียบสงบ… รอความเคลื่อนไหวในออฟฟิศ —": { en: "— quiet… waiting for office activity —", zh: "— 安静… 等待办公室动态 —", ja: "— 静か… オフィスの動きを待っています —" },
+    "กำลังฟัง…": { en: "Listening…", zh: "聆听中…", ja: "聞いています…" },
+    // plugins panel
+    "ส่วนขยายของออฟฟิศ — คลิกเพื่อเปิดแผง · agents สั่งงาน plugin เหล่านี้ได้": { en: "Office extensions — click to open a panel · agents can drive these plugins", zh: "办公室扩展 — 点击打开面板 · 代理可控制这些插件", ja: "オフィス拡張 — クリックでパネルを開く · エージェントが操作可能" },
+    "ยังไม่มี plugin": { en: "No plugins yet", zh: "暂无插件", ja: "プラグインはまだありません" },
+    "โหลด plugins ใหม่": { en: "Reload plugins", zh: "重新加载插件", ja: "プラグインを再読み込み" },
+    "เปิดแผง": { en: "Open panel", zh: "打开面板", ja: "パネルを開く" },
+    "คำสั่ง": { en: "commands", zh: "命令", ja: "コマンド" },
+    "กลับ": { en: "Back", zh: "返回", ja: "戻る" },
+    // editor
+    "🎨 จัดออฟฟิศ (Editor)": { en: "🎨 Office Editor", zh: "🎨 办公室编辑器", ja: "🎨 オフィスエディタ" },
+    "คลิกบนผังเพื่อวาง · ลากเพื่อย้าย · ดับเบิลคลิกเพื่อลบ": { en: "Click to place · drag to move · double-click to remove", zh: "点击放置 · 拖动移动 · 双击删除", ja: "クリックで配置 · ドラッグで移動 · ダブルクリックで削除" },
+    "ล้างทั้งหมด": { en: "Clear all", zh: "全部清除", ja: "すべて消去" },
+    "บันทึกผัง": { en: "Save layout", zh: "保存布局", ja: "レイアウト保存" },
+    // settings tabs
+    "AGENTS": { en: "AGENTS", zh: "代理", ja: "エージェント" },
+    "ROLES": { en: "ROLES", zh: "角色", ja: "役職" },
+    "SKILLS": { en: "SKILLS", zh: "技能", ja: "スキル" },
+    "TOOLS": { en: "TOOLS", zh: "工具", ja: "ツール" },
+    "THREADS": { en: "THREADS", zh: "会话", ja: "スレッド" },
+    // ops tabs
+    "📁 PROJECTS": { en: "📁 PROJECTS", zh: "📁 项目", ja: "📁 プロジェクト" },
+    "📋 TASKS": { en: "📋 TASKS", zh: "📋 任务", ja: "📋 タスク" },
+    "📅 CALENDAR": { en: "📅 CALENDAR", zh: "📅 日历", ja: "📅 カレンダー" },
+    "📝 NOTES": { en: "📝 NOTES", zh: "📝 笔记", ja: "📝 ノート" },
+    "🏢 ORG": { en: "🏢 ORG", zh: "🏢 组织", ja: "🏢 組織" },
+    "📊 STATS": { en: "📊 STATS", zh: "📊 统计", ja: "📊 統計" },
+    // common buttons
+    "💾 Save": { en: "💾 Save", zh: "💾 保存", ja: "💾 保存" },
+    "Cancel": { en: "Cancel", zh: "取消", ja: "キャンセル" },
+    "+ Hire a new agent": { en: "+ Hire a new agent", zh: "+ 雇佣新代理", ja: "+ 新しいエージェントを雇う" },
+    // persistent chrome
+    "ล่าสุด (ต่อเนื่องอัตโนมัติ)": { en: "Latest (auto-continued)", zh: "最新（自动延续）", ja: "最新（自動継続）" },
+    "▼ ดูทั้งหมด": { en: "▼ See all", zh: "▼ 查看全部", ja: "▼ すべて表示" },
+    "▲ พับ": { en: "▲ Collapse", zh: "▲ 收起", ja: "▲ 折りたたむ" },
+    "ส่งแล้ว ✓": { en: "Sent ✓", zh: "已发送 ✓", ja: "送信済み ✓" },
+    "ทดสอบ": { en: "Test", zh: "测试", ja: "テスト" },
+    "เปลี่ยน": { en: "Change", zh: "更改", ja: "変更" },
+    // editor palette
+    "🪑 โต๊ะทำงาน": { en: "🪑 Desk", zh: "🪑 办公桌", ja: "🪑 デスク" },
+    "🍽 โต๊ะกลม": { en: "🍽 Round table", zh: "🍽 圆桌", ja: "🍽 丸テーブル" },
+    "💺 เก้าอี้": { en: "💺 Chair", zh: "💺 椅子", ja: "💺 椅子" },
+    "📚 ชั้นวาง": { en: "📚 Shelf", zh: "📚 书架", ja: "📚 棚" },
+    "🪴 ต้นไม้": { en: "🪴 Plant", zh: "🪴 植物", ja: "🪴 植物" },
+    "💡 โคมไฟ": { en: "💡 Lamp", zh: "💡 灯", ja: "💡 ランプ" },
+    "🟫 พรม": { en: "🟫 Rug", zh: "🟫 地毯", ja: "🟫 ラグ" },
+    "🧱 ฉากกั้น": { en: "🧱 Partition", zh: "🧱 隔断", ja: "🧱 仕切り" },
+    "🧱 กำแพง": { en: "🧱 Wall", zh: "🧱 墙", ja: "🧱 壁" },
+    "🖼 รูป (import)": { en: "🖼 Image (import)", zh: "🖼 图片（导入）", ja: "🖼 画像（インポート）" },
+    "📦 โมเดล (import)": { en: "📦 Model (import)", zh: "📦 模型（导入）", ja: "📦 モデル（インポート）" },
   };
   function uiLang() {
-    try { return localStorage.getItem("lang") || "en"; } catch { return "en"; }
+    try {
+      const q = new URLSearchParams(location.search).get("lang");
+      if (q) { localStorage.setItem("lang", q); return q; }
+      return localStorage.getItem("lang") || "en";
+    } catch { return "en"; }
   }
   let LANG = uiLang();
-  function t(s) {
-    if (LANG === "th") return s;
-    const d = I18N[LANG];
-    return (d && d[s]) || s;
+  function tr(s) {
+    if (LANG === "th" || !s) return s;
+    const e = DICT[String(s).trim()];
+    return (e && e[LANG]) || s;
+  }
+  const t = tr;  // back-compat for the few inline ${t(...)} uses
+  // Walk a subtree and translate exact Thai matches in text + placeholder/title.
+  function applyI18n(root) {
+    if (LANG === "th") return;
+    if (root.nodeType === 1) {
+      if (root.placeholder && DICT[root.placeholder.trim()]) {
+        const e = DICT[root.placeholder.trim()]; if (e[LANG]) root.placeholder = e[LANG];
+      }
+      if (root.title && DICT[root.title.trim()]) {
+        const e = DICT[root.title.trim()]; if (e[LANG]) root.title = e[LANG];
+      }
+    }
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const hits = [];
+    let n;
+    while ((n = walk.nextNode())) {
+      const raw = n.nodeValue, key = raw.trim();
+      if (key && DICT[key] && DICT[key][LANG]) hits.push([n, raw.replace(key, DICT[key][LANG])]);
+    }
+    for (const [node, val] of hits) node.nodeValue = val;
+    // placeholders/titles on descendants
+    if (root.querySelectorAll) root.querySelectorAll("[placeholder],[title]").forEach((el) => {
+      ["placeholder", "title"].forEach((a) => {
+        const v = el.getAttribute(a); if (v && DICT[v.trim()] && DICT[v.trim()][LANG]) el.setAttribute(a, DICT[v.trim()][LANG]);
+      });
+    });
   }
   function setLang(l) {
     try { localStorage.setItem("lang", l); } catch {}
     location.reload();
+  }
+  // auto-translate anything rendered after load (modals, menus, feed items)
+  if (LANG !== "th") {
+    const _obs = new MutationObserver((muts) => {
+      for (const m of muts) for (const nd of m.addedNodes) if (nd.nodeType === 1) applyI18n(nd);
+    });
+    addEventListener("DOMContentLoaded", () => {
+      applyI18n(document.body);
+      _obs.observe(document.body, { childList: true, subtree: true });
+    });
   }
 
   // ---- portable identity (must match agent_manager.gd) -------------------
@@ -1619,10 +1717,14 @@
     m.innerHTML = "";
     for (const [val, label] of DAY_OPTS) {
       const o = document.createElement("div");
-      o.className = "opt" + (String(val) === String(dayMode) ? " active" : "");
-      o.textContent = label;
+      const active = String(val) === String(dayMode);
+      o.className = "opt" + (active ? " active" : "");
+      // ✓ marks the current selection; the others reserve the space so the
+      // list stays aligned.
+      o.textContent = (active ? "✓ " : " ") + label;
       o.onclick = () => {
         m.classList.remove("open");
+        dayMode = val;  // reflect immediately so the ✓ is right next open
         fetch("/ui/daylight", { method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ hour: val }) });
       };
@@ -1642,6 +1744,25 @@
   document.addEventListener("click", () => moreMenu.classList.remove("open"));
   moreMenu.querySelectorAll(".opt").forEach((o) =>
     o.addEventListener("click", () => moreMenu.classList.remove("open")));
+
+  // 🌐 language menu — its own picker (UI language for the whole program)
+  const langMenu = document.getElementById("langMenu");
+  function renderLangMenu() {
+    langMenu.innerHTML = "";
+    for (const [code, label] of LANGS) {
+      const o = document.createElement("div");
+      o.className = "opt" + (code === LANG ? " active" : "");
+      o.textContent = (code === LANG ? "✓ " : "") + label;
+      o.onclick = () => { api("/registry/lang", { lang: code }); setLang(code); };
+      langMenu.appendChild(o);
+    }
+  }
+  document.getElementById("langBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    renderLangMenu();
+    langMenu.classList.toggle("open");
+  });
+  document.addEventListener("click", () => langMenu.classList.remove("open"));
 
   // ---- settings / editor / ID card -----------------------------------------
   const modal = document.getElementById("modal");
@@ -1803,11 +1924,6 @@
             <option value="30">ทุก 30 นาที</option>
             <option value="60">ทุก 1 ชั่วโมง</option>
           </select></div>
-        <div class="field" style="margin-top:8px"><label>🌐 ${t("ภาษา")} / Language — เปลี่ยนภาษาของทั้งโปรแกรม</label>
-          <select id="langSel">
-            <option value="en">🇬🇧 English</option>
-            <option value="th">🇹🇭 ไทย</option>
-          </select></div>
         <div class="field" style="margin-top:8px"><label>☕ SOCIAL — agents ว่างๆ จับกลุ่มคุย/หยอกล้อกันเอง (อาจเสนอโปรเจคให้คุณอนุมัติ)</label>
           <select id="socSel">
             <option value="0">ปิด</option>
@@ -1906,9 +2022,6 @@
       const socSel = modalCard.querySelector("#socSel");
       socSel.value = String(SOCIALMIN);
       socSel.onchange = () => api("/registry/social", { min: Number(socSel.value) });
-      const langSel = modalCard.querySelector("#langSel");
-      langSel.value = LANG;
-      langSel.onchange = () => { api("/registry/lang", { lang: langSel.value }); setLang(langSel.value); };
       const hbSel = modalCard.querySelector("#hbSel");
       hbSel.value = String(HEARTBEAT);
       hbSel.onchange = async () => {
@@ -2433,7 +2546,9 @@
   // World extents match the live map (MAP). Items store world meters; the
   // grid is just a scaled view. Godot reads /layout and spawns on top of the
   // base world, so atmosphere + effects are never touched.
-  const EDMAP = { x0: -11, x1: 17, z0: -11, z1: 14 };  // world bounds
+  // Match the live-map capture extents EXACTLY so placed items line up with
+  // the room image behind the grid.
+  const EDMAP = { x0: -11.29, x1: -11.29 + 28.57, z0: -11.0, z1: 14.0 };
   const ED_ITEMS = [
     ["desk", "🪑 โต๊ะทำงาน"], ["table", "🍽 โต๊ะกลม"], ["chair", "💺 เก้าอี้"],
     ["shelf", "📚 ชั้นวาง"], ["plant", "🪴 ต้นไม้"], ["lamp", "💡 โคมไฟ"],
@@ -2454,6 +2569,10 @@
          <button class="danger" id="edClear">🗑 ${t("ล้างทั้งหมด")}</button>
          <button class="primary" id="edSave">💾 ${t("บันทึกผัง")}</button>
        </div>`;
+    // show the real office (live top-down render) behind the grid so you can
+    // see the rooms and place relative to them.
+    const grid0 = modalCard.querySelector("#edGrid");
+    grid0.style.backgroundImage = `url(/map/bg?t=${Date.now()})`;
     const pal = modalCard.querySelector("#edPalette");
     for (const [type, label] of ED_ITEMS) {
       const b = document.createElement("div");
