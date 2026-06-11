@@ -79,7 +79,7 @@ const I18N = {
     dn_install:"Installation", dn_install_win:"Windows (one-shot)", dn_install_manual:"Manual build", dn_install_first:"First run", dn_install_fix:"If it fails",
     dn_using:"Using it", dn_chat:"Chat & the CEO", dn_projects:"Projects", dn_security:"Permissions", dn_editor:"3D Editor", dn_voice:"Voice & channels", dn_updates:"Updates & start-up",
     dn_features:"Features", dn_plugins:"Plugins & skills", dn_lang:"Languages",
-    dn_cli:"CLI reference", dn_faq:"FAQ",
+    dn_cli:"CLI reference", dn_faq:"FAQ", dn_changelog:"Changelog ↗",
 
     d_intro_h:"Introduction", d_intro_p1:"BagIdea Office is a living AI-agent office that runs as your desktop wallpaper. Every AI agent on your machine becomes a pixel-art employee in an HD-2D office: they walk to their desks when real work starts, gather at Security to ask permission, hold meetings, learn skills, and the lights follow your real local time.",
     d_intro_p2:"It is not a dashboard and not a chat window — it is a world that renders the true state of your Claude Code sessions, headless agent runs and custom scripts as living characters, behind your desktop icons.",
@@ -203,7 +203,7 @@ const I18N = {
     dn_install:"Installation", dn_install_win:"Windows (Einzel-Befehl)", dn_install_manual:"Manueller Build", dn_install_first:"Erste Ausführung",
     dn_using:"Nutzung", dn_chat:"Chat & CEO", dn_projects:"Projekte", dn_security:"Berechtigungen", dn_editor:"3D-Editor", dn_voice:"Sprache & Kanäle",
     dn_features:"Funktionen", dn_plugins:"Plugins & Fähigkeiten", dn_lang:"Sprachen",
-    dn_cli:"CLI-Referenz", dn_faq:"FAQ",
+    dn_cli:"CLI-Referenz", dn_faq:"FAQ", dn_changelog:"Changelog ↗",
 
     d_intro_h:"Einführung", d_intro_p1:"BagIdea Office ist ein lebendiges KI-Agenten-Büro, das als dein Desktop-Hintergrund läuft. Jeder KI-Agent auf deinem Rechner wird zu einem Pixel-Art-Mitarbeiter in einem HD-2D-Büro: Sie gehen an ihre Schreibtische, wenn die echte Arbeit beginnt, versammeln sich an der Security, um um Erlaubnis zu bitten, halten Meetings ab, erlernen Fähigkeiten, und das Licht folgt deiner realen Ortszeit.",
     d_intro_p2:"Es ist kein Dashboard und kein Chatfenster — es ist eine Welt, die den wahren Zustand Ihrer Claude Code-Sitzungen, kopflosen Agent-Läufe und benutzerdefinierten Skripte als lebendige Figuren hinter Ihren Desktop-Icons rendert.",
@@ -318,7 +318,7 @@ const I18N = {
     dn_install:"การติดตั้ง", dn_install_win:"Windows (คำสั่งเดียว)", dn_install_manual:"ติดตั้งเอง", dn_install_first:"เปิดครั้งแรก", dn_install_fix:"ถ้าติดตั้งไม่ผ่าน",
     dn_using:"การใช้งาน", dn_chat:"แชท & CEO", dn_projects:"โปรเจค", dn_security:"สิทธิ์การใช้เครื่องมือ", dn_editor:"3D Editor", dn_voice:"เสียง & ช่องทาง", dn_updates:"อัปเดต & เปิดพร้อม Windows",
     dn_features:"ฟีเจอร์", dn_plugins:"Plugin & สกิล", dn_lang:"ภาษา",
-    dn_cli:"คำสั่ง CLI", dn_faq:"คำถามที่พบบ่อย",
+    dn_cli:"คำสั่ง CLI", dn_faq:"คำถามที่พบบ่อย", dn_changelog:"บันทึกการเปลี่ยนแปลง ↗",
 
     d_intro_h:"แนะนำ", d_intro_p1:"BagIdea Office คือออฟฟิศเอเจนต์ AI ที่มีชีวิตชีวาซึ่งทำงานเป็นวอลเปเปอร์เดสก์ท็อปของคุณ เอเจนต์ AI ทุกตัวบนเครื่องของคุณจะกลายเป็นพนักงานพิกเซลอาร์ตในออฟฟิศ HD-2D พวกเขาจะเดินไปที่โต๊ะทำงานเมื่อเริ่มงานจริง รวมตัวกันที่ฝ่ายรักษาความปลอดภัยเพื่อขออนุญาต จัดประชุม เรียนรู้ทักษะต่างๆ และแสงไฟจะเปลี่ยนไปตามเวลาท้องถิ่นจริงของคุณ",
     d_intro_p2:"มันไม่ใช่แดชบอร์ดและไม่ใช่หน้าต่างแชท — แต่เป็นโลกที่เรนเดอร์สถานะจริงของ Claude Code session, การรัน agent แบบ headless และสคริปต์ของคุณ เป็นตัวละครมีชีวิต อยู่หลังไอคอนเดสก์ท็อป",

@@ -126,6 +126,7 @@
   "dn_lang": "Idiomas",
   "dn_cli": "Referencia CLI",
   "dn_faq": "Preguntas frecuentes",
+  "dn_changelog": "Registro de cambios ↗",
   "d_intro_h": "Introducción",
   "d_intro_p1": "BagIdea Office es una oficina de agentes de IA viva que se ejecuta como el fondo de pantalla de tu escritorio Windows. Cada agente de IA en tu máquina se convierte en un empleado de arte pixelado en una oficina HD-2D: caminan a sus escritorios cuando comienza el trabajo real, se reúnen en Seguridad para pedir permiso, celebran reuniones, aprenden habilidades, y las luces siguen tu hora local real.",
   "d_intro_p2": "No es un panel ni una ventana de chat — es un mundo que renderiza el estado real de tus sesiones de Claude Code, ejecuciones de agentes sin interfaz y scripts personalizados como personajes vivos, detrás de los iconos de tu escritorio.",

@@ -28,6 +28,7 @@ unlocks agent voices, voice commands, realtime calls and image generation, and
 the office truly comes alive.
 
 🌐 **Website:** the landing page + browsable docs live in [`web/`](web/) (deployable to any static host).
+📝 **What changed:** see the [`CHANGELOG.md`](CHANGELOG.md) for per-release notes.
 
 ![The office at golden hour — the whole floor, the team at work, the Ghost Deck and server room glowing](docs/img/world.png)
 *Captured live: the full office floor at golden hour — the CEO, the Director (Shino) and staff at their desks, the floating Ghost Deck (top-right), the server room glowing, the brand billboard and roofline clock, the office cat wandering. The day/night cycle follows your real local time.*

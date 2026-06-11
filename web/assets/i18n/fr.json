@@ -126,6 +126,7 @@
   "dn_lang": "Langues",
   "dn_cli": "Référence CLI",
   "dn_faq": "FAQ",
+  "dn_changelog": "Journal des modifications ↗",
   "d_intro_h": "Introduction",
   "d_intro_p1": "BagIdea Office est un bureau IA vivant qui s'exécute comme fond d'écran de votre bureau Windows. Chaque agent IA sur votre machine devient un employé en pixel art dans un bureau HD-2D : ils marchent vers leurs postes quand le vrai travail commence, se rassemblent à la Sécurité pour demander des permissions, tiennent des réunions, apprennent des compétences, et les lumières suivent votre heure locale réelle.",
   "d_intro_p2": "Ce n'est pas un tableau de bord ni une fenêtre de chat — c'est un monde qui affiche l'état réel de vos sessions Claude Code, des exécutions d'agents sans interface et des scripts personnalisés sous forme de personnages vivants, derrière vos icônes de bureau.",

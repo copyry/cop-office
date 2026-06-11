@@ -126,6 +126,7 @@
   "dn_lang": "Ngôn ngữ",
   "dn_cli": "Tài liệu tham khảo CLI",
   "dn_faq": "Câu hỏi thường gặp",
+  "dn_changelog": "Nhật ký thay đổi ↗",
   "d_intro_h": "Giới thiệu",
   "d_intro_p1": "BagIdea Office là một văn phòng AI agent sống động chạy như hình nền màn hình Windows của bạn. Mỗi AI agent trên máy của bạn trở thành một nhân viên pixel-art trong văn phòng HD-2D: họ đi đến bàn làm việc khi công việc thực bắt đầu, tập trung tại Bảo mật để xin phép, tổ chức cuộc họp, học kỹ năng, và ánh đèn theo giờ địa phương thực của bạn.",
   "d_intro_p2": "Đây không phải là bảng điều khiển cũng không phải cửa sổ trò chuyện — đó là một thế giới hiển thị trạng thái thực của các phiên Claude Code, các lượt chạy agent không có giao diện và các tập lệnh tùy chỉnh của bạn dưới dạng các nhân vật sống, phía sau các biểu tượng màn hình của bạn.",
