@@ -4,6 +4,20 @@ All notable changes to BagIdea Office. A **release** is a deliberate `VERSION`
 bump on `main` (see [RELEASING.md](RELEASING.md)) — that's what triggers the
 in-app 🔄 update banner. Versions follow [semver](https://semver.org).
 
+## [0.7.1] — Voice input fix + audio device settings
+
+**Fixed**
+- **Voice dictation now grows the chat box.** A long spoken message used to land
+  as multiple lines crammed into one unreadable row (the box only auto-grew while
+  *typing*). Dictated text now expands the box exactly like typing does.
+
+**Added**
+- **Audio device settings** (⚙ → AGENTS): choose which **microphone** the office
+  records your voice from and which **speaker** agent voices + sound effects play
+  through — fixes cases where the wrong or too-quiet mic was being used. Your
+  choice is remembered. (Speaker selection needs platform support; where it isn't
+  available — e.g. macOS — it's disabled with a note pointing to the OS settings.)
+
 ## [0.7.0] — Leaner & smarter: Hermes-style memory + native skills
 
 A big efficiency pass. The office is **exactly as capable** — every feature is
@@ -110,6 +124,7 @@ behavior if anything goes wrong.
 
 *Earlier history predates this changelog — see `git log` for the full record.*
 
+[0.7.1]: https://github.com/bagidea/bagidea-office/releases/tag/v0.7.1
 [0.7.0]: https://github.com/bagidea/bagidea-office/releases/tag/v0.7.0
 [0.6.4]: https://github.com/bagidea/bagidea-office/releases/tag/v0.6.4
 [0.6.3]: https://github.com/bagidea/bagidea-office/releases/tag/v0.6.3
