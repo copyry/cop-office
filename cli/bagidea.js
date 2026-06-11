@@ -265,8 +265,7 @@ if (cmd === "uninstall") {
   const ps = path.join(ROOT, "installer", "uninstall.ps1");
   if (!fs.existsSync(ps)) return bad("installer/uninstall.ps1 not found");
   const keepData = rest.includes("--keep-data");
-...
-    const psArgs = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps];
+  const psArgs = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps];
     if (keepData) psArgs.push("-KeepData");
     const go = () => {
       info("Uninstalling… a new window finishes up (this terminal can close).");
