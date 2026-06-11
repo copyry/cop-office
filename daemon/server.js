@@ -390,6 +390,29 @@ function statBump(field, agent, cost) {
     fs.writeFile(STATS, JSON.stringify(stats, null, 1), () => {}), 1500);
 }
 
+// Rough per-use cost ESTIMATES for the secondary tools (USD). Unlike Claude,
+// these APIs don't return a real cost, so the dashboard labels them "≈". Tune
+// freely — public pricing moves. (One place to edit.)
+const COST_RATES = {
+  gemini_tts_per_char:    0.000016,  // Gemini 2.5 Flash TTS, per input char
+  gemini_image_each:      0.039,     // Gemini 2.5 Flash image, per image
+  gemini_i18n_per_char:   0.0000004, // flash-latest translate, per char (tiny)
+  gemini_transcribe_each: 0.002,     // Gemini STT fallback, per clip (~30s)
+  openai_whisper_each:    0.003,     // OpenAI Whisper, per clip (~30s @ $0.006/min)
+  openai_image_each:      0.04,      // OpenAI image, per image
+};
+// Add an ESTIMATED secondary-tool spend under stats[day].aux[provider].
+function auxCost(provider, usd) {
+  if (!usd || usd <= 0) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const d = (stats[day] = stats[day] || { runs: 0, done: 0, failed: 0, cost: 0, agents: {} });
+  d.aux = d.aux || { gemini: 0, openai: 0 };
+  d.aux[provider] = Math.round(((d.aux[provider] || 0) + usd) * 1e6) / 1e6;
+  clearTimeout(statBump._t);
+  statBump._t = setTimeout(() =>
+    fs.writeFile(STATS, JSON.stringify(stats, null, 1), () => {}), 1500);
+}
+
 let jobs = loadJson(JOBS, []);    // {id, agent, prompt, mode, at, time, daily, everyMin, enabled, lastRun, lastDay, done, sessionKey}
 let notes = loadJson(NOTES, []);  // {id, who, text, ts}
 let cal = loadJson(CAL, []);      // {id, title, at, remindMin, notified}
@@ -1357,7 +1380,7 @@ function voiceTranscribe(buf) {
             const j = JSON.parse(o);
             const t = j.candidates && j.candidates[0] &&
               j.candidates[0].content.parts.map((p) => p.text || "").join("").trim();
-            if (t) resolve(t);
+            if (t) { auxCost("gemini", COST_RATES.gemini_transcribe_each); resolve(t); }
             else reject(new Error((j.error && j.error.message) || "gemini: empty"));
           } catch (e) { reject(e); }
         });
@@ -1387,7 +1410,7 @@ function voiceTranscribe(buf) {
       rs.on("end", () => {
         try {
           const j = JSON.parse(o);
-          if (j.text !== undefined) resolve(String(j.text).trim());
+          if (j.text !== undefined) { auxCost("openai", COST_RATES.openai_whisper_each); resolve(String(j.text).trim()); }
           else tryGemini(new Error((j.error && j.error.message) || "openai: empty"));
         } catch (e) { tryGemini(e); }
       });
@@ -1496,6 +1519,7 @@ function ttsSpeak(presetId, text) {
           const part = j.candidates && j.candidates[0] &&
             j.candidates[0].content.parts.find((x) => x.inlineData);
           if (!part) return reject(new Error((j.error && j.error.message) || "tts: no audio"));
+          auxCost("gemini", (text || "").length * COST_RATES.gemini_tts_per_char);
           // inlineData = raw 16-bit PCM @24kHz — wrap as WAV for the browser.
           resolve(pcmToWav(Buffer.from(part.inlineData.data, "base64"), 24000));
         } catch (e) { reject(e); }
@@ -1541,7 +1565,7 @@ function genImage(prompt) {
             const j = JSON.parse(o);
             const part = j.candidates && j.candidates[0] &&
               j.candidates[0].content.parts.find((x) => x.inlineData);
-            if (part) save(part.inlineData.data);
+            if (part) { auxCost("gemini", COST_RATES.gemini_image_each); save(part.inlineData.data); }
             else reject(new Error((j.error && j.error.message) || "gemini image: empty"));
           } catch (e) { reject(e); }
         });
@@ -1564,7 +1588,7 @@ function genImage(prompt) {
       rs.on("end", () => {
         try {
           const j = JSON.parse(o);
-          if (j.data && j.data[0] && j.data[0].b64_json) save(j.data[0].b64_json);
+          if (j.data && j.data[0] && j.data[0].b64_json) { auxCost("openai", COST_RATES.openai_image_each); save(j.data[0].b64_json); }
           else tryGemini(new Error((j.error && j.error.message) || "openai image: empty"));
         } catch (e) { tryGemini(e); }
       });
@@ -2509,6 +2533,13 @@ const server = http.createServer((req, res) => {
       try {
         const p = JSON.parse(body);
         if (p.remove) notes = notes.filter((n) => n.id !== p.remove);
+        else if (p.edit) {
+          const n = notes.find((x) => x.id === p.edit);
+          if (!n) throw new Error("note not found");
+          const txt = String(p.text || "").trim().slice(0, 500);
+          if (!txt) throw new Error("empty");
+          n.text = txt;  // keep id/who/ts so the note stays in place
+        }
         else if (p.text) notes.push({ id: "n" + Date.now(), who: p.who || "you",
           text: String(p.text).slice(0, 500), ts: Date.now() });
         else throw new Error("no text");
@@ -3208,6 +3239,7 @@ const server = http.createServer((req, res) => {
                   j.candidates[0].content.parts.map((p) => p.text || "").join("");
                 const m = JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
                 for (const k of chunk) if (m[k] !== undefined) cache[k] = String(m[k]);
+                auxCost("gemini", chunk.join("").length * COST_RATES.gemini_i18n_per_char);
               } catch (e) { console.error("[i18n]", e.message); }
               finish();
             });

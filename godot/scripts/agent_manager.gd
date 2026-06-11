@@ -67,8 +67,13 @@ func resnap_agents() -> void:
 		var a: Dictionary = agents[id]
 		if not is_instance_valid(a.node): continue
 		var home: String = String(a.get("desk", ""))
-		if home == "" or not world.WP.has(home): home = "ops_c"
-		if world.WP.has(home): a.node.teleport(world.WP[home])
+		if home != "" and world.WP.has(home):
+			a.node.teleport(world.WP[home])
+		else:
+			# No fixed desk (idle agents) → SPREAD them, never pile on ops_c.
+			# This also ran at boot (layout_loader → apply_room_order → resnap),
+			# which is what stacked everyone in one room on launch.
+			a.node.teleport(_spawn_base(id))
 	if is_instance_valid(ceo) and world.WP.has("ceo_desk"):
 		ceo.teleport(world.WP["ceo_desk"])
 
@@ -683,6 +688,32 @@ func _route_hook_to_ghost(id: String, type: String, evt: Dictionary) -> void:
 
 # ---------------------------------------------------------------- agents
 
+## A spread-out spawn POSITION so agents don't all pile up at boot. Returns
+## shuffled room anchors when they're ready; if the waypoint table isn't built
+## yet (a boot race that put everyone on "ops_c"), it still SPREADS them across
+## the floor interior so it's never a single pile.
+var _spawn_pool: Array = []   # Array[Vector3]
+var _spawn_n := 0
+func _spawn_base(id: String) -> Vector3:
+	# main works in the exec office; everyone else fans out across the rooms.
+	if id == "main" and world.WP.has("exec_c"):
+		return world.WP["exec_c"]
+	if _spawn_pool.is_empty():
+		for w in ["cafe_s1", "cafe_s2", "cafe_c", "rec_s1", "rec_s2", "rec_s3", "rec_s4",
+				"rec_c", "m_s1", "m_s2", "m_s3", "m_s4", "ops_c", "server_c", "lobby_c",
+				"desk1", "desk2", "desk3", "desk4"]:
+			if world.WP.has(w):
+				_spawn_pool.append(world.WP[w])
+		_spawn_pool.shuffle()
+	if not _spawn_pool.is_empty():
+		var p: Vector3 = _spawn_pool[_spawn_n % _spawn_pool.size()]
+		_spawn_n += 1
+		return p
+	# waypoints not ready → spread across the floor interior (never a pile)
+	_spawn_n += 1
+	var h: Vector2 = world.floor_half() if world.has_method("floor_half") else Vector2(14.0, 10.0)
+	return Vector3(randf_range(-h.x + 2.0, h.x - 2.0), 0.86, randf_range(-h.y + 2.0, h.y - 2.0))
+
 func _ensure(id: String) -> Dictionary:
 	if agents.has(id):
 		return agents[id]
@@ -691,18 +722,18 @@ func _ensure(id: String) -> Dictionary:
 		var c := {"node": ceo, "state": "idle", "desk": "", "bed": "", "id": "ceo", "tasks": {}}
 		agents["ceo"] = c
 		return c
-	# New hire: walk in through the lobby front door.
+	# Spawn already SPREAD across the rooms (main in the exec office; everyone
+	# else at a distributed room spot) so they don't stack on the door at boot.
 	var node := _make_char(id)
-	node.position = world.WP["spawn"]
+	# spread across the rooms (small scatter so same-room agents don't overlap)
+	node.position = _spawn_base(id) + Vector3(randf_range(-0.7, 0.7), 0, randf_range(-0.7, 0.7))
 	get_parent().add_child(node)
 	node.set_status(id)
 	var a := {"node": node, "state": "idle", "desk": "", "bed": "", "id": id, "tasks": {}}
 	agents[id] = a
-	# New hires teleport in — a little sci-fi warp at the door.
+	# A little sci-fi warp as they materialize.
 	Sfx.play("door_in")
 	Fx.spawn(node, "warp_in", Vector3(0, -0.2, 0), 0.022)
-	# The main agent heads to the executive office; everyone else idles in cafe.
-	_walk(node, "exec_c" if id == "main" else _next_seat())
 	_clear_status_later(a, 5.0)
 	return a
 
@@ -1120,14 +1151,20 @@ func _idle_life_loop() -> void:
 		# Weighted so the CAFE gets as much love as the REC room, with the odd
 		# wander to the server/meeting rooms (rare). Beds are handled by naps.
 		var r := randf()
-		if r < 0.18:
+		if r < 0.13:
 			_act_tv(a)             # rec
-		elif r < 0.28:
+		elif r < 0.21:
 			_act_ball(a)           # rec
-		elif r < 0.38:
+		elif r < 0.29:
 			_act_pet(a)            # rec
-		elif r < 0.76:
-			_act_cafe(a)           # cafe — equal weight to the rec activities
+		elif r < 0.41:
+			_act_chase(a, pool)    # play tag with a friend (falls back if alone)
+		elif r < 0.49:
+			_act_dance(a)          # a little dance in the rec room
+		elif r < 0.55:
+			_act_stretch(a)        # quick stretch on the spot
+		elif r < 0.80:
+			_act_cafe(a)           # cafe — still the biggest single share
 		elif r < 0.92:
 			_act_chat(a, pool)     # chat with a colleague (anywhere)
 		else:
@@ -1217,6 +1254,59 @@ func _act_explore(a: Dictionary) -> void:
 	await get_tree().create_timer(d + randf_range(6.0, 12.0)).timeout
 	if a.state == "idle":
 		a.node.set_status("")
+
+## Keep a free target point inside the office (the chase dash could otherwise
+## fling an agent through a wall and out onto the lawn).
+func _clamp_floor(p: Vector3) -> Vector3:
+	var h := Vector2(15.0, 11.0)
+	if world.has_method("floor_half"):
+		h = world.floor_half()
+	return Vector3(clampf(p.x, -h.x + 1.3, h.x - 1.3), p.y, clampf(p.z, -h.y + 1.3, h.y - 1.3))
+
+## Two idle agents play tag — one chases, the other dashes away. Pure fun.
+func _act_chase(a: Dictionary, pool: Array) -> void:
+	var others := pool.filter(func(o): return o.id != a.id and o.state == "idle")
+	if others.is_empty():
+		return
+	var b: Dictionary = others.pick_random()
+	a.node.set_status(ui("ไล่จับเพื่อน 🏃"))
+	b.node.set_status(ui("หนีสุดชีวิต 😆"))
+	for _i in range(2):
+		if a.state != "idle" or b.state != "idle" or not is_instance_valid(a.node) or not is_instance_valid(b.node):
+			break
+		var away: Vector3 = b.node.position - a.node.position
+		away = (Vector3(1, 0, 0) if away.length() < 0.1 else away.normalized())
+		var flee: Vector3 = _clamp_floor(b.node.position + away * randf_range(2.2, 3.4))
+		var db: float = b.node.walk_to(world.path_between(b.node.position, flee))
+		var da: float = a.node.walk_to(world.path_between(a.node.position, b.node.position))
+		await get_tree().create_timer(max(da, db) + 0.15).timeout
+	if a.state == "idle" and is_instance_valid(a.node):
+		_fx(a, "sparkle")
+		_maybe_focus(a.node, 0.7, 6.0)
+	_clear_status_later(a, 5.0)
+	_clear_status_later(b, 5.0)
+
+## A little spot-dance in the rec room.
+func _act_dance(a: Dictionary) -> void:
+	a.node.set_status(ui("เต้นเล่น 🎶"))
+	var d: float = _walk(a.node, "rec_c")
+	await get_tree().create_timer(d).timeout
+	for _i in range(3):
+		if a.state != "idle" or not is_instance_valid(a.node):
+			break
+		_fx(a, "music")
+		await get_tree().create_timer(0.85).timeout
+	if a.state == "idle":
+		_maybe_focus(a.node, 0.5, 5.0)
+	_clear_status_later(a, 3.0)
+
+## A quick stretch / yawn on the spot — small, cute, and cheap.
+func _act_stretch(a: Dictionary) -> void:
+	a.node.set_status(ui("ยืดเส้นยืดสาย 🙆"))
+	if is_instance_valid(a.node):
+		_fx(a, "sparkle")
+	await get_tree().create_timer(randf_range(3.0, 5.0)).timeout
+	_clear_status_later(a, 1.0)
 
 # ---------------------------------------------------------------- naps
 # No orders for 3 minutes → an agent may decide to take a bunk nap (beds

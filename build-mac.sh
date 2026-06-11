@@ -39,11 +39,11 @@ GODOT_ZIP="$ROOT/godot/godot_macos.zip"
 
 echo "[2/6] checking Godot engine..."
 if [ ! -d "$GODOT_APP" ]; then
-    echo "    + downloading Godot 4.6.3 (universal)..."
+    echo "    + downloading Godot 4.6.3 (universal) - about 120 MB; a progress bar follows. This takes a few minutes, it is NOT frozen..."
     mkdir -p "$GODOT_DIR"
-    # Note: Using the version mentioned in the project requirements
-    curl -L "https://github.com/godotengine/godot/releases/download/4.6.3-stable/Godot_v4.6.3-stable_macos.universal.zip" -o "$GODOT_ZIP"
-    echo "    + unzipping..."
+    # --progress-bar gives a visible moving bar so the download never looks stuck.
+    curl -L --progress-bar "https://github.com/godotengine/godot/releases/download/4.6.3-stable/Godot_v4.6.3-stable_macos.universal.zip" -o "$GODOT_ZIP"
+    echo "    + unzipping (a moment)..."
     unzip -q "$GODOT_ZIP" -d "$GODOT_DIR"
     rm "$GODOT_ZIP"
     echo "    → installed Godot to $GODOT_APP"
@@ -53,12 +53,14 @@ fi
 
 # ---- 3. Build Components -----------------------------------------------------
 echo "[3/6] building wallpaper shim (DYLD injected into Godot)…"
+echo "    + compiling Rust - 'Compiling ...' lines will scroll. The first build takes several minutes, it is NOT frozen..."
 ( cd "$ROOT/shell/macos/wallpaper_shim" && cargo build --release )
 cp "$ROOT/shell/macos/wallpaper_shim/target/release/libwallpaper_shim.dylib" \
    "$ROOT/shell/macos/libwallpaper_shim.dylib"
 codesign --force --sign - "$ROOT/shell/macos/libwallpaper_shim.dylib"
 
 echo "[4/6] building the native shell…"
+echo "    + compiling the shell - more 'Compiling ...' lines; another few minutes, still working (NOT frozen)..."
 ( cd "$ROOT/shell" && cargo build --release )
 
 # ---- 4. Wiring --------------------------------------------------------------

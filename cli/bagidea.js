@@ -296,6 +296,10 @@ async function main() {
     const today = s.days[s.days.length - 1];
     banner();
     console.log(`\n  ${c.bold}Today${c.reset}  ${c.bold}${today.runs}${c.reset} jobs   ${c.ok}✓ ${today.done}${c.reset}  ${c.err}✗ ${today.failed}${c.reset}   ${c.warn}$${(today.cost || 0).toFixed(2)}${c.reset}   ${c.gray}uptime ${Math.floor(s.uptimeSec / 3600)}h ${Math.floor((s.uptimeSec % 3600) / 60)}m${c.reset}`);
+    {
+      const g = (today.aux && today.aux.gemini) || 0, o = (today.aux && today.aux.openai) || 0, cl = today.cost || 0;
+      console.log(`  ${c.gray}spend  Claude $${cl.toFixed(2)} · Gemini ≈$${g.toFixed(3)} · OpenAI ≈$${o.toFixed(3)} · total ≈$${(cl + g + o).toFixed(2)}  (Gemini/OpenAI are estimates)${c.reset}`);
+    }
     head("Last 7 days");
     const maxR = Math.max(1, ...s.days.map((d) => d.runs));
     for (const d of s.days) {

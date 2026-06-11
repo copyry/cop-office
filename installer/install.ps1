@@ -34,6 +34,19 @@ function Step($n, $m) { Write-Host ""; Write-Host "  [$n] $m" -ForegroundColor C
 function Ok($m)   { Write-Host "      + $m" -ForegroundColor Green }
 function Skip($m) { Write-Host "      - $m" -ForegroundColor DarkGray }
 function Warn($m) { Write-Host "      ! $m" -ForegroundColor Yellow }
+
+# Download a big file WITH a visible, moving progress bar so it never looks
+# frozen. BITS shows a clean % bar and is fast; Invoke-WebRequest is the fallback.
+function Get-File($url, $out, $label) {
+  Write-Host "      downloading $label - you'll see a progress bar; large files take a few minutes (NOT frozen)..." -ForegroundColor DarkGray
+  $ProgressPreference = "Continue"
+  try {
+    Import-Module BitsTransfer -ErrorAction Stop
+    Start-BitsTransfer -Source $url -Destination $out -Description $label -DisplayName $label -ErrorAction Stop
+  } catch {
+    Invoke-WebRequest -Uri $url -OutFile $out
+  }
+}
 function Have($c) { return [bool](Get-Command $c -ErrorAction SilentlyContinue) }
 
 # Pull freshly-installed tools onto THIS session's PATH (winget updates the
@@ -59,11 +72,13 @@ if (-not (Have "winget")) {
   Warn "Store link: https://apps.microsoft.com/detail/9nblggh4nns1"
   exit 1
 }
-# NOTE: do NOT name this "Winget" — PowerShell command names are case-insensitive,
+# NOTE: do NOT name this "Winget" - PowerShell command names are case-insensitive,
 # so a function "Winget" shadows winget.exe and `winget install` inside it would
 # call the function again forever (CallDepthOverflow). Call the .exe explicitly.
 function WingetInstall($id) {
-  winget.exe install --id $id -e --silent --accept-package-agreements --accept-source-agreements | Out-Null
+  # No "| Out-Null" - let winget's own download/progress bar show so the step
+  # has visible movement instead of looking frozen during a multi-minute install.
+  winget.exe install --id $id -e --silent --accept-package-agreements --accept-source-agreements
   Sync-Path
 }
 
@@ -101,10 +116,12 @@ function Have-MSVC {
 if (Have-MSVC) { Skip "C++ build tools already present" }
 elseif ($SkipBuildTools) { Warn "skipped (-SkipBuildTools) - the build will fail without a C++ linker" }
 else {
-  Warn "Not found. Installing the C++ workload (large download ~2-4 GB, one time)..."
+  Warn "Not found. Installing the C++ workload now."
+  Warn "This is a LARGE one-time download (~2-4 GB) and can take 10-20 minutes."
+  Warn "The progress bar may sit still for a while during install - it is NOT frozen. Please leave it running."
   winget.exe install --id Microsoft.VisualStudio.2022.BuildTools -e --silent `
     --accept-package-agreements --accept-source-agreements `
-    --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" | Out-Null
+    --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
   if (Have-MSVC) { Ok "C++ build tools installed" }
   else { Warn "could not confirm the build tools - if the build fails, install 'Desktop development with C++' from the Visual Studio Installer" }
 }
@@ -117,7 +134,8 @@ else {
   New-Item -ItemType Directory -Force $gdir | Out-Null
   $z = Join-Path $env:TEMP "godot.zip"
   try {
-    Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/$GODOTV-stable/Godot_v$GODOTV-stable_win64.exe.zip" -OutFile $z
+    Get-File "https://github.com/godotengine/godot/releases/download/$GODOTV-stable/Godot_v$GODOTV-stable_win64.exe.zip" $z "Godot $GODOTV (~120 MB)"
+    Write-Host "      extracting Godot (a few seconds)..." -ForegroundColor DarkGray
     Expand-Archive -Path $z -DestinationPath $gdir -Force; Remove-Item $z -ErrorAction SilentlyContinue
     if (Test-Path $gexe) { Ok "installed" } else { Warn "extracted but exe not found" }
   } catch { Warn "download failed - check your connection and re-run" }
@@ -127,7 +145,7 @@ $env:BAGIDEA_GODOT = $gexe
 
 Step 6 "Claude Code CLI (the brain of every agent)"
 if (Have "claude") { Skip "already installed" }
-elseif (Have "npm") { npm install -g @anthropic-ai/claude-code | Out-Null; Sync-Path; Ok "installed - log in later by running: claude" }
+elseif (Have "npm") { Write-Host "      installing via npm (about a minute)..." -ForegroundColor DarkGray; npm install -g @anthropic-ai/claude-code; Sync-Path; Ok "installed - log in later by running: claude" }
 else { Warn "npm not on PATH yet - reopen a terminal and run: npm install -g @anthropic-ai/claude-code" }
 
 # ---- stop a running instance first -------------------------------------------
@@ -180,8 +198,7 @@ if ($Assets) {
     $srcZip = $Assets
     if ($Assets -match "^https?://") {
       $srcZip = Join-Path $env:TEMP "bagidea-assets.zip"
-      Warn "downloading art pack..."
-      Invoke-WebRequest -Uri $Assets -OutFile $srcZip
+      Get-File $Assets $srcZip "art pack"
     }
     if (Test-Path $srcZip -PathType Container) {
       Copy-Item (Join-Path $srcZip "*") $assetDir -Recurse -Force
@@ -206,6 +223,7 @@ Step 8 "Build the desktop shell (first build can take a few minutes)"
 $exe = Join-Path $APP "shell\target\release\bagidea-office-shell.exe"
 if (Have "cargo") { $cargo = "cargo" }
 Push-Location (Join-Path $APP "shell")
+Write-Host "      compiling - you'll see 'Compiling <crate>' lines scroll; the first build is 3-8 min (NOT frozen)..." -ForegroundColor DarkGray
 & $cargo build --release
 Pop-Location
 if (Test-Path $exe) { Ok "built -> $exe" }

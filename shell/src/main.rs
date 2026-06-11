@@ -299,6 +299,48 @@ mod platform {
     };
 
     static PTT_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    // Hold-to-talk via a low-level keyboard hook: the bound key, whether it's
+    // currently held (to swallow auto-repeat), and a proxy the C callback can
+    // reach to fire PttKey(down/up) into the event loop.
+    static PTT_VK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x75); // VK_F6
+    static PTT_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static PTT_PROXY: std::sync::Mutex<Option<tao::event_loop::EventLoopProxy<super::UserEvent>>> =
+        std::sync::Mutex::new(None);
+
+    fn ptt_send(down: bool) {
+        if let Ok(g) = PTT_PROXY.lock() {
+            if let Some(p) = g.as_ref() {
+                let _ = p.send_event(super::UserEvent::PttKey(down));
+            }
+        }
+    }
+
+    // Low-level keyboard hook proc — sees every key, acts only on the bound one,
+    // and ALWAYS chains so normal typing is never blocked or delayed.
+    unsafe extern "system" fn ll_kbd(code: i32, wparam: usize, lparam: isize) -> isize {
+        use std::sync::atomic::Ordering;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CallNextHookEx, HC_ACTION, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
+            WM_SYSKEYUP,
+        };
+        if code == HC_ACTION as i32 && !lparam_is_null(lparam) {
+            let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
+            if kb.vkCode == PTT_VK.load(Ordering::Relaxed) {
+                let w = wparam as u32;
+                if w == WM_KEYDOWN || w == WM_SYSKEYDOWN {
+                    if !PTT_DOWN.swap(true, Ordering::SeqCst) {
+                        ptt_send(true);
+                    }
+                } else if w == WM_KEYUP || w == WM_SYSKEYUP {
+                    if PTT_DOWN.swap(false, Ordering::SeqCst) {
+                        ptt_send(false);
+                    }
+                }
+            }
+        }
+        CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+    }
+    fn lparam_is_null(l: isize) -> bool { l == 0 }
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -357,33 +399,40 @@ mod platform {
     }
 
     pub fn spawn_hotkey_thread(proxy: tao::event_loop::EventLoopProxy<UserEvent>) {
-        let initial = parse_vk("f6");
+        if let Some((_m, v)) = parse_vk("f6") {
+            PTT_VK.store(v, std::sync::atomic::Ordering::SeqCst);
+        }
+        // The C hook callback reaches the event loop through this static.
+        if let Ok(mut g) = PTT_PROXY.lock() { *g = Some(proxy); }
         std::thread::spawn(move || unsafe {
             use std::sync::atomic::Ordering;
             use windows_sys::Win32::System::Threading::GetCurrentThreadId;
-            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
-            use windows_sys::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_APP, WM_HOTKEY};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                GetMessageW, SetWindowsHookExW, UnhookWindowsHookEx, MSG, WH_KEYBOARD_LL, WM_APP,
+            };
             PTT_THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
-            let mut ok = false;
-            if let Some((m, v)) = initial {
-                ok = RegisterHotKey(std::ptr::null_mut(), 1, m | 0x4000, v) != 0;
-            }
-            ptt_beacon(if ok { "registered" } else { "register-FAILED" });
+            // A low-level keyboard hook delivers BOTH key-down and key-up, which
+            // RegisterHotKey never did (press-only → the old press-to-start /
+            // press-to-stop toggle). The hook callback is dispatched on the
+            // thread that installed it, so we must keep pumping messages here.
+            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_kbd), std::ptr::null_mut(), 0);
+            ptt_beacon(if hook.is_null() { "register-FAILED" } else { "registered" });
             let mut msg: MSG = std::mem::zeroed();
             while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-                if msg.message == WM_HOTKEY {
-                    ptt_beacon("hook-press");
-                    let _ = proxy.send_event(UserEvent::PttKey(true));
-                } else if msg.message == WM_APP {
-                    UnregisterHotKey(std::ptr::null_mut(), 1);
+                if msg.message == WM_APP {
+                    // rebind: switch the watched key (lParam carries the new vk).
                     let vk = msg.lParam as u32;
                     if vk != 0 {
-                        let r = RegisterHotKey(std::ptr::null_mut(), 1, (msg.wParam as u32) | 0x4000, vk);
-                        ptt_beacon(if r != 0 { "rehook-ok" } else { "rehook-FAILED" });
+                        PTT_VK.store(vk, Ordering::SeqCst);
+                        PTT_DOWN.store(false, Ordering::SeqCst);
+                        ptt_beacon("rehook-ok");
                     } else {
                         ptt_beacon("rehook-none");
                     }
                 }
+            }
+            if !hook.is_null() {
+                UnhookWindowsHookEx(hook);
             }
         });
     }
@@ -1049,9 +1098,6 @@ fn main() {
     let mut editor_pid: u32 = 0;
     let mut world_ready = false;
     let mut last_watch = std::time::Instant::now();
-    let mut last_ptt = std::time::Instant::now()
-        .checked_sub(std::time::Duration::from_secs(10))
-        .unwrap_or_else(std::time::Instant::now);
     event_loop.run(move |event, _, control_flow| {
         // A slow poll tick keeps the tray channels live without pinning a core.
         *control_flow = ControlFlow::WaitUntil(
@@ -1200,8 +1246,9 @@ fn main() {
                 UserEvent::DragOrb => { let _ = orb.drag_window(); }
                 UserEvent::DragOverlay => { let _ = overlay.drag_window(); }
                 UserEvent::PttKey(pressed) => {
-                    if pressed && last_ptt.elapsed().as_millis() >= 600 {
-                        last_ptt = std::time::Instant::now();
+                    // True hold-to-talk: key DOWN starts recording, key UP sends.
+                    // (The low-level hook fires once per physical press/release.)
+                    if pressed {
                         let hidden = overlay
                             .outer_position()
                             .map(|p| p.x < -2000)
@@ -1215,9 +1262,11 @@ fn main() {
                             overlay.set_outer_position(LogicalPosition::new(px, py));
                             raise_orb(&orb);
                         }
-                        let _ = overlay_view
-                            .evaluate_script("window.pttToggle && pttToggle()");
-                        ptt_beacon("toggle");
+                        let _ = overlay_view.evaluate_script("window.pttSet && pttSet(true)");
+                        ptt_beacon("down");
+                    } else {
+                        let _ = overlay_view.evaluate_script("window.pttSet && pttSet(false)");
+                        ptt_beacon("up");
                     }
                 }
                 UserEvent::SetHotkey(s) => platform::rebind_hotkey(&s),
