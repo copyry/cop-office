@@ -4,6 +4,31 @@ All notable changes to BagIdea Office. A **release** is a deliberate `VERSION`
 bump on `main` (see [RELEASING.md](RELEASING.md)) — that's what triggers the
 in-app 🔄 update banner. Versions follow [semver](https://semver.org).
 
+## [0.7.4] — Pop-out windows + smarter Office Ops
+
+**Added**
+- **Pop-out plugin windows.** Open any plugin's panel as its **own window** (the
+  ⤢ button) — a custom dark title bar with **minimize / maximize / close**, drag
+  to move, resize from the edges. Each plugin opens one window (re-clicking just
+  focuses it); different plugins open side by side. Plugins can set their default
+  size (and lock it) via `plugin.json` — Calculator & Music are fixed-size. The
+  first step toward plugins as real standalone apps.
+- **Watch an agent live.** A 👁 button on a working project opens a read-only
+  window that streams what the agent is doing right now — without interrupting it.
+- **Search box on the Plugins panel** (and it was already added to Projects).
+
+**Changed**
+- **Tasks tidy themselves.** A run-now or one-time scheduled task now disappears
+  once it finishes (it used to linger forever); repeating tasks stay and are now
+  **editable in place**. A running task shows "working on this…".
+- **Project proposals moved below your task form** so they stop covering it.
+- **Calendar clarity.** Past entries grey out with a ✓, a fired reminder turns
+  **yellow** ("almost due"), and any upcoming entry is editable.
+
+**Fixed**
+- The date/time picker's calendar **icon is now visible** (white) on the dark
+  theme, and its popup is dark-themed.
+
 ## [0.7.3] — Dogs back on the ground
 
 **Fixed**
@@ -165,6 +190,7 @@ behavior if anything goes wrong.
 
 *Earlier history predates this changelog — see `git log` for the full record.*
 
+[0.7.4]: https://github.com/bagidea/bagidea-office/releases/tag/v0.7.4
 [0.7.3]: https://github.com/bagidea/bagidea-office/releases/tag/v0.7.3
 [0.7.2]: https://github.com/bagidea/bagidea-office/releases/tag/v0.7.2
 [0.7.1]: https://github.com/bagidea/bagidea-office/releases/tag/v0.7.1

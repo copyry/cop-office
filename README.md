@@ -30,6 +30,15 @@ the office truly comes alive.
 🌐 **Website:** the landing page + browsable docs live in [`web/`](web/) (deployable to any static host).
 📝 **What changed:** see the [`CHANGELOG.md`](CHANGELOG.md) for per-release notes.
 
+### 🆕 Recently shipped
+BagIdea Office is updated **constantly** — every office gets a 🔄 banner and one-click `bagidea update`. The latest:
+
+- **v0.7.4** — pop-out plugin **windows** (custom chrome: minimize/maximize/close, resizable or fixed), a **watch-agent-live** window, self-tidying & **editable tasks**, calendar states, Plugins search.
+- **v0.7.0–0.7.3** — **Hermes-style memory + native skills** (far fewer tokens, same smarts), audio device settings, chat timestamps & image lightbox, cleaner shadows, a livelier office (cross-room chase, server-room incidents).
+- **v0.6.x** — first **macOS** build (beta), full **14-language** UI, cost visibility, Right-Ctrl push-to-talk.
+
+→ Full history in the [**CHANGELOG**](CHANGELOG.md).
+
 ![The office at golden hour — the whole floor, the team at work, the Ghost Deck and server room glowing](docs/img/world.png)
 *Captured live: the full office floor at golden hour — the CEO, the Director (Shino) and staff at their desks, the floating Ghost Deck (top-right), the server room glowing, the brand billboard and roofline clock, the office cat wandering. The day/night cycle follows your real local time.*
 

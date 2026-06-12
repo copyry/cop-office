@@ -180,5 +180,10 @@
   "d_faq_q3": "Quais plataformas são suportadas?",
   "d_faq_a3": "Windows 11 hoje. Backends de papel de parede para Linux e macOS estão no roadmap.",
   "d_faq_q4": "Posso criar meu próprio plugin?",
-  "d_faq_a4": "Sim — faça um fork do repositório de template oficial. Uma pessoa ou um agente pode criar um plugin funcional a partir dele em minutos; a especificação completa está no guia de plugins."
+  "d_faq_a4": "Sim — faça um fork do repositório de template oficial. Uma pessoa ou um agente pode criar um plugin funcional a partir dele em minutos; a especificação completa está no guia de plugins.",
+  "upd_eyebrow": "Sempre melhorando",
+  "upd_title": "Atualizado constantemente",
+  "upd_sub": "O BagIdea Office recebe atualizações o tempo todo — correções, novos recursos e ajustes. Cada escritório recebe um aviso de atualização com um clique.",
+  "upd_latest": "Mais recente",
+  "upd_cta": "Ver novidades →"
 }

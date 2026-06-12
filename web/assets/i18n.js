@@ -12,7 +12,7 @@ const RTL = new Set(["ar"]);
 const I18N = {
   en: {
     nav_features:"Features", nav_docs:"Docs", nav_install:"Install", nav_sponsors:"Sponsors",
-    cta_get:"Get started", cta_docs:"Read the docs", cta_github:"GitHub",
+    cta_get:"Get started", cta_docs:"Read the docs", cta_github:"GitHub", upd_eyebrow:"Always improving", upd_title:"Updated constantly", upd_sub:"BagIdea Office ships real updates all the time — bug fixes, new features and polish. Every office gets a one-click update notice.", upd_latest:"Latest", upd_cta:"See what's new →",
     hero_title:'Your wallpaper <span class="grad">goes to work</span>.',
     hero_sub:"BagIdea Office turns your desktop into a living HD-2D office where every AI agent is a real Claude that walks to its desk, asks permission, holds meetings, and gets work done — behind your icons.",
     badge_win:"Windows 11 · macOS (beta)", badge_open:"Open source", badge_free:"Free to run",
@@ -138,7 +138,7 @@ const I18N = {
 
   de: {
     nav_features:"Funktionen", nav_docs:"Dokumentation", nav_install:"Installieren", nav_sponsors:"Sponsoren",
-    cta_get:"Loslegen", cta_docs:"Dokumentation lesen", cta_github:"GitHub",
+    cta_get:"Loslegen", cta_docs:"Dokumentation lesen", cta_github:"GitHub", upd_eyebrow:"Immer besser", upd_title:"Ständig aktualisiert", upd_sub:"BagIdea Office erhält ständig Updates — Fehlerbehebungen, neue Funktionen und Feinschliff. Jedes Office bekommt eine Update-Benachrichtigung mit einem Klick.", upd_latest:"Neueste", upd_cta:"Was ist neu →",
     hero_title:'Ihr Hintergrundbild <span class="grad">geht arbeiten</span>.',
     hero_sub:"BagIdea Office verwandelt deinen Desktop in ein lebendiges HD-2D-Büro, in dem jeder KI-Agent ein echter Claude ist, der an seinen Schreibtisch geht, um Erlaubnis bittet, Meetings abhält und Arbeit erledigt – hinter deinen Icons.",
     badge_win:"Windows 11 · macOS (beta)", badge_open:"Open Source", badge_free:"Kostenlos nutzbar",
@@ -252,7 +252,7 @@ const I18N = {
 
   th: {
     nav_features:"ฟีเจอร์", nav_docs:"คู่มือ", nav_install:"ติดตั้ง", nav_sponsors:"สปอนเซอร์",
-    cta_get:"เริ่มใช้งาน", cta_docs:"อ่านคู่มือ", cta_github:"GitHub",
+    cta_get:"เริ่มใช้งาน", cta_docs:"อ่านคู่มือ", cta_github:"GitHub", upd_eyebrow:"พัฒนาต่อเนื่อง", upd_title:"อัปเดตตลอดเวลา", upd_sub:"BagIdea Office อัปเดตจริงตลอด — แก้บั๊ก เพิ่มฟีเจอร์ใหม่ และขัดเกลา ทุกออฟฟิศได้รับแจ้งอัปเดตเพียงคลิกเดียว", upd_latest:"ล่าสุด", upd_cta:"ดูว่ามีอะไรใหม่ →",
     hero_title:'วอลเปเปอร์ของคุณ <span class="grad">ทำงานได้จริง</span>',
     hero_sub:"BagIdea Office เปลี่ยนเดสก์ท็อปของคุณให้เป็นออฟฟิศ HD-2D ที่มีชีวิตชีวา ซึ่งเอเจนต์ AI ทุกตัวคือ Claude ตัวจริงที่เดินไปที่โต๊ะทำงานของตัวเอง ขออนุญาต จัดประชุม และทำงานจนเสร็จสิ้น — อยู่เบื้องหลังไอคอนต่างๆ ของคุณ",
     badge_win:"Windows 11 · macOS (beta)", badge_open:"โอเพนซอร์ส", badge_free:"ใช้ฟรี",
