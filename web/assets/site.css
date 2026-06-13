@@ -85,10 +85,14 @@ h2.title + .lead { text-align:center; color:var(--dim); max-width:720px; margin:
 
 /* feature grid */
 .grid { display:grid; gap:18px; margin-top:42px; }
-.grid.c3 { grid-template-columns:repeat(3,1fr); }
-.grid.c2 { grid-template-columns:repeat(2,1fr); }
-@media(max-width:900px){ .grid.c3 { grid-template-columns:1fr 1fr; } }
-@media(max-width:640px){ .grid.c3,.grid.c2 { grid-template-columns:1fr; } }
+/* c3/c2 use centered flex-wrap so an incomplete last row stays balanced — a lone
+   trailing card centers instead of dangling alone on the left (grid left-aligned
+   it, which looked off once the card count wasn't a clean multiple of 3). */
+.grid.c3, .grid.c2 { display:flex; flex-wrap:wrap; justify-content:center; }
+.grid.c3 > * { flex:1 1 300px; max-width:calc(33.333% - 12px); }
+.grid.c2 > * { flex:1 1 340px; max-width:calc(50% - 9px); }
+@media(max-width:900px){ .grid.c3 > * { max-width:calc(50% - 9px); } }
+@media(max-width:640px){ .grid.c3 > *, .grid.c2 > * { max-width:100%; flex-basis:100%; } }
 .feat { background:linear-gradient(180deg,var(--card),var(--card2)); border:1px solid var(--line);
   border-radius:16px; padding:22px; transition:border-color .2s, transform .2s; }
 .feat:hover { border-color:var(--accent); transform:translateY(-3px); }
