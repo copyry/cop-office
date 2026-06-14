@@ -684,6 +684,10 @@ mod platform {
         b.with_undecorated_shadow(false).with_skip_taskbar(true)
     }
 
+    // Windows routes clipboard shortcuts to the focused control directly — no
+    // app menu needed.
+    pub fn install_app_menu() {}
+
     pub fn set_no_activate(window: &Window) {
         unsafe {
             let hwnd = window.hwnd() as HWND;
@@ -960,6 +964,51 @@ mod platform {
         b
     }
 
+    /// Install a minimal main menu with a standard Edit submenu.
+    ///
+    /// macOS routes ⌘X/⌘C/⌘V/⌘A through the app's main-menu Edit items to the
+    /// first responder (the focused webview text field). tao installs no menu,
+    /// so those shortcuts are dropped — that's why typing works in the overlay
+    /// but paste silently does nothing. Building the Edit menu once at startup
+    /// restores cut/copy/paste/select-all inside every overlay/popup webview.
+    pub fn install_app_menu() {
+        use objc2::rc::Retained;
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem};
+
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let app = NSApplication::sharedApplication(mtm);
+
+        let menubar = NSMenu::new(mtm);
+        // App-menu slot (the bold first item by convention) — left empty.
+        let app_item = NSMenuItem::new(mtm);
+        menubar.addItem(&app_item);
+        app_item.setSubmenu(Some(&NSMenu::new(mtm)));
+
+        // Edit menu — its items carry the clipboard key equivalents.
+        let edit_item = NSMenuItem::new(mtm);
+        menubar.addItem(&edit_item);
+        let edit_menu = NSMenu::new(mtm);
+        edit_menu.setTitle(&NSString::from_str("Edit"));
+        edit_item.setSubmenu(Some(&edit_menu));
+
+        let mk = |title: &str, action: objc2::runtime::Sel, key: &str| -> Retained<NSMenuItem> {
+            let item = NSMenuItem::new(mtm);
+            item.setTitle(&NSString::from_str(title));
+            // SAFETY: standard responder-chain selectors; nil target = first
+            // responder. Default key-equivalent modifier is ⌘, so "v" = ⌘V.
+            unsafe { item.setAction(Some(action)) };
+            item.setKeyEquivalent(&NSString::from_str(key));
+            item
+        };
+        edit_menu.addItem(&mk("Cut", objc2::sel!(cut:), "x"));
+        edit_menu.addItem(&mk("Copy", objc2::sel!(copy:), "c"));
+        edit_menu.addItem(&mk("Paste", objc2::sel!(paste:), "v"));
+        edit_menu.addItem(&mk("Select All", objc2::sel!(selectAll:), "a"));
+
+        app.setMainMenu(Some(&menubar));
+    }
+
     pub fn set_no_activate(_window: &Window) {}
 
     fn round_corners(window: &Window, radius: f64) {
@@ -1146,6 +1195,7 @@ mod platform {
     pub fn hide_office(_pid: u32, _hidden: bool) {}
     pub fn focus_pid(_pid: u32) -> bool { false }
     pub fn apply_chrome(b: WindowBuilder) -> WindowBuilder { b }
+    pub fn install_app_menu() {}
     pub fn set_no_activate(_w: &Window) {}
     pub fn region_round(_w: &Window, _a: f64, _b: f64, _r: f64) {}
     pub fn region_circle(_w: &Window, _d: f64) {}
@@ -1200,6 +1250,10 @@ fn main() {
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+
+    // Standard Edit menu so ⌘X/⌘C/⌘V/⌘A work inside the overlay webviews
+    // (macOS routes clipboard shortcuts through the main menu; no-op elsewhere).
+    platform::install_app_menu();
 
     let (phys_w, phys_h) = event_loop
         .primary_monitor()

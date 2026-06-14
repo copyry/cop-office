@@ -90,3 +90,45 @@ BAGIDEA_WINDOW=1 ./shell/target/release/bagidea-office-shell
 Expect: Godot opens as a bordered 1280×800 window centred on screen, plus the
 floating chat head and the tray icon. Running without `BAGIDEA_WINDOW` gives the
 original borderless desktop wallpaper.
+
+---
+
+# Bonus fix — macOS clipboard shortcuts in overlay webviews (⌘V)
+
+> Independent of windowed mode but found alongside it; port this too.
+
+**Symptom:** in the overlay (a `wry`/WKWebView chat UI) you could type but
+**⌘V / ⌘C / ⌘X / ⌘A did nothing** — paste worked in every other app.
+
+**Cause:** macOS routes clipboard shortcuts through the app's **main-menu Edit
+items** to the first responder. `tao` installs no menu, so the key equivalents
+are dropped before they reach the webview's text field. (Works even for
+background/accessory apps — macOS calls `performKeyEquivalent:` on the main menu
+regardless of whether a menu bar is visible.)
+
+**Fix — `shell/src/main.rs`:** new `platform::install_app_menu()`, called once at
+boot right after the event loop is built. macOS impl builds a minimal main menu
+with an Edit submenu:
+
+```rust
+// objc2-app-kit typed API (needs Cargo features "NSMenu", "NSMenuItem")
+let app = NSApplication::sharedApplication(mtm);
+let menubar = NSMenu::new(mtm);
+let app_item = NSMenuItem::new(mtm);            // bold app-menu slot, left empty
+menubar.addItem(&app_item);
+app_item.setSubmenu(Some(&NSMenu::new(mtm)));
+let edit_item = NSMenuItem::new(mtm);
+menubar.addItem(&edit_item);
+let edit_menu = NSMenu::new(mtm);
+edit_item.setSubmenu(Some(&edit_menu));
+// each item: setTitle + setAction(sel!(paste:)) + setKeyEquivalent("v")  → ⌘V
+//   Cut=cut:/x  Copy=copy:/c  Paste=paste:/v  Select All=selectAll:/a
+app.setMainMenu(Some(&menubar));
+```
+
+- `shell/Cargo.toml`: add `"NSMenu"`, `"NSMenuItem"` to `objc2-app-kit` features.
+- Windows + fallback `install_app_menu()` are no-ops (Windows delivers clipboard
+  shortcuts to the focused control directly).
+- Default `NSMenuItem` key-equivalent modifier is ⌘, so a bare `"v"` = ⌘V.
+
+**Test:** open the overlay, focus the chat input, ⌘V → pastes.
