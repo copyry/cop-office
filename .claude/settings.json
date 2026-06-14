@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"E:\\Projects\\bagidea-ai-agents-office\\daemon\\hook.ps1\" -Type task.started"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"E:\\Projects\\bagidea-ai-agents-office\\daemon\\hook.ps1\" -Type task.started || exit 0"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"E:\\Projects\\bagidea-ai-agents-office\\daemon\\hook.ps1\" -Type task.progress"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"E:\\Projects\\bagidea-ai-agents-office\\daemon\\hook.ps1\" -Type task.progress || exit 0"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"E:\\Projects\\bagidea-ai-agents-office\\daemon\\hook.ps1\" -Type task.completed"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"E:\\Projects\\bagidea-ai-agents-office\\daemon\\hook.ps1\" -Type task.completed || exit 0"
           }
         ]
       }
