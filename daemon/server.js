@@ -3560,6 +3560,50 @@ const server = http.createServer((req, res) => {
       });
     } catch (e) { res.writeHead(400); res.end(String(e.message)); } });
 
+  } else if (req.method === "POST" && req.url === "/workflows/run") {
+    // Run the workflow NOW — hand it to the Director as an order (full DELEGATE
+    // power), and ride the result back.
+    readBody(req, (body) => { try {
+      const w = JSON.parse(body || "{}");
+      queueDirectorTurn((release) => {
+        ceoFlow(
+          "Execute this workflow now. Do each step; a node with several outgoing " +
+          "arrows runs those branches in parallel; a node with several incoming " +
+          "arrows waits for all of them first. Delegate where it makes sense, then " +
+          "report the result.\n\n" + workflowToText(w),
+          undefined, undefined,
+          { logPrompt: "🔀▶ รัน workflow: " + (w.name || ""),
+            onDone: (out, ok) => {
+              release();
+              res.writeHead(200, { "content-type": "application/json" });
+              res.end(JSON.stringify({ ok: !!ok, result: ok && out ? out : "รันไม่สำเร็จ ลองใหม่อีกครั้ง" }));
+            } });
+      });
+    } catch (e) { res.writeHead(400); res.end(String(e.message)); } });
+
+  } else if (req.method === "POST" && req.url === "/workflows/skill") {
+    // Compile the workflow into a reusable SKILL — then it can be assigned to an
+    // agent (Settings → agent → tick the skill) and triggered on demand.
+    readBody(req, (body) => { try {
+      const w = JSON.parse(body || "{}");
+      const nm = String(w.name || "Workflow").slice(0, 50);
+      const id = ("wf-" + slugId(nm)).slice(0, 50);
+      reg.skills[id] = {
+        name: ("🔀 " + nm).slice(0, 60),
+        description: ("Run the saved workflow: " + nm).slice(0, 200),
+        content: ("When asked to run \"" + nm + "\", follow this workflow exactly:\n\n" +
+          workflowToText(w) +
+          "\nDo the steps in order; run parallel branches concurrently (e.g. split into " +
+          "ghost sub-agents), and at a merge wait for every incoming branch before " +
+          "continuing. Report the final result clearly.").slice(0, 4000),
+      };
+      saveReg();
+      try { if (retrievalOk) { retrieval.reindexSkill(id, reg.skills[id]); retrieval.persist(); } } catch {}
+      pushRoster();
+      broadcast({ type: "skill.created", agent: "", skill: reg.skills[id].name });
+      res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ id, name: reg.skills[id].name }));
+    } catch (e) { res.writeHead(400); res.end(String(e.message)); } });
+
   } else if (req.method === "POST" && req.url === "/event") {
     readBody(req, (body) => {
       try {

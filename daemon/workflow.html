@@ -66,6 +66,7 @@
   #plan { white-space:pre-wrap; font-size:12.5px; color:#d6e2f0; background:#0a1020;
     border:1px solid var(--line); border-radius:10px; padding:11px; min-height:80px; }
   #side .muted { color:var(--dim); font-size:11px; }
+  .acts { display:flex; gap:8px; margin-top:4px; } .acts button { flex:1; }
   #robadge { font-size:11px; color:#ffcf8a; background:rgba(255,180,90,.1);
     border:1px solid rgba(255,180,90,.3); border-radius:8px; padding:6px 9px; display:none; }
   #robadge.show { display:block; }
@@ -99,8 +100,13 @@
     <div id="side">
       <h3>🤖 แผนจาก Director</h3>
       <div id="robadge">📄 นี่คือ <b>ตัวอย่าง</b> (อ่านอย่างเดียว) — กด 💾 บันทึก เพื่อทำสำเนาที่แก้ไขได้</div>
-      <div class="muted">กด “วิเคราะห์” แล้ว Director จะอ่าน workflow (รวมการแตกแขนง/รวม) แล้วบอกว่าต้องใช้ skill/tool/permission อะไร และมอบหมายให้ใคร (ยังไม่ลงมือทำจริง)</div>
+      <div class="muted">กด “วิเคราะห์” แล้ว Director จะอ่าน workflow (รวมการแตกแขนง/รวม) แล้วบอกว่าต้องใช้ skill/tool/permission อะไร และมอบหมายให้ใคร</div>
       <div id="plan">— ยังไม่มีการวิเคราะห์ —</div>
+      <div class="acts">
+        <button onclick="runWf()">▶️ รันเลย</button>
+        <button onclick="makeSkill()">🧠 สร้างเป็น Skill</button>
+      </div>
+      <div class="muted">“<b>รันเลย</b>” = ให้ทีมทำตาม workflow นี้เดี๋ยวนี้ แล้วรายงานผล · “<b>สร้างเป็น Skill</b>” = บันทึกเป็นสกิลที่นำไปติ๊กให้ agent ในหน้าตั้งค่า เพื่อเรียกใช้ซ้ำเมื่อไหร่ก็ได้ (หรือพิมพ์สั่ง agent ให้ “รัน &lt;ชื่อ workflow&gt;”)</div>
     </div>
   </div>
 <script>
@@ -289,6 +295,19 @@
     fetch("/workflows/analyze", { method:"POST", headers:{"content-type":"application/json"},
       body: JSON.stringify({ name: nameInp.value, nodes, edges }) })
       .then(r=>r.json()).then(j=>{ plan.textContent = j.analysis || "—"; }).catch(()=>{ plan.textContent="วิเคราะห์ไม่สำเร็จ ลองใหม่"; });
+  }
+  function runWf() {
+    if (!nodes.length) return flash("เพิ่ม node ก่อนนะ");
+    const plan = document.getElementById("plan"); plan.textContent = "⏳ ทีมกำลังทำงานตาม workflow…";
+    fetch("/workflows/run", { method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({ name: nameInp.value, nodes, edges }) })
+      .then(r=>r.json()).then(j=>{ plan.textContent = "✅ ผลลัพธ์:\n\n" + (j.result || "—"); }).catch(()=>{ plan.textContent="รันไม่สำเร็จ ลองใหม่"; });
+  }
+  function makeSkill() {
+    if (!nodes.length) return flash("เพิ่ม node ก่อนนะ");
+    fetch("/workflows/skill", { method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({ name: nameInp.value, nodes, edges }) })
+      .then(r=>r.json()).then(j=>{ flash("🧠 สร้างสกิล “"+(j.name||"")+"” แล้ว — ไปติ๊กให้ agent ในหน้าตั้งค่า"); }).catch(()=>flash("สร้าง skill ไม่สำเร็จ"));
   }
   function loadList() {
     fetch("/workflows").then(r=>r.json()).then(list=>{

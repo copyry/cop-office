@@ -2950,15 +2950,15 @@
       row.innerHTML = `<div class="meta"><b>${p.name}</b>
           <span>${(p.description || "").replace(/</g, "&lt;")} · v${p.version || "?"}` +
         (p.commands.length ? ` · ${p.commands.length} คำสั่ง` : "") + `</span></div>` +
-        (p.panel ? `<div class="winbtn" title="เปิดแผง">▶</div>` : "") +
-        (p.panel && shellPost ? `<div class="winbtn" title="เปิดเป็นหน้าต่างแยก">⤢</div>` : "") +
+        (p.panel ? `<div class="winbtn" title="เปิดหน้าต่าง">⤢ เปิด</div>` : "") +
         (p.core ? `<span class="hide" title="plugin หลัก ลบไม่ได้" style="opacity:.5;font-size:13px;align-self:center">🔒</span>`
                 : `<div class="winbtn hide" title="ถอนการติดตั้ง">🗑</div>`);
-      const openBtn = row.querySelector('[title="เปิดแผง"]');
-      if (openBtn) openBtn.onclick = () => openPluginPanel(p);
-      else if (!p.panel) row.style.cursor = "default";
-      const winBtn = row.querySelector('[title="เปิดเป็นหน้าต่างแยก"]');
-      if (winBtn) winBtn.onclick = () => openPluginWindow(p);
+      // One mode only: a plugin panel opens as its OWN window (click the row or
+      // the button). No in-modal panel — so it can't be open two ways at once.
+      const openBtn = row.querySelector('[title="เปิดหน้าต่าง"]');
+      if (openBtn) openBtn.onclick = (e) => { e.stopPropagation(); openPluginWindow(p); };
+      if (p.panel) row.onclick = () => openPluginWindow(p);
+      else row.style.cursor = "default";
       const del = row.querySelector('[title="ถอนการติดตั้ง"]');
       if (del) del.onclick = () => api("/plugins/remove", { id: p.id }).then(() => openPlugins());
       box.appendChild(row);
