@@ -857,6 +857,14 @@ mod platform {
     }
 
     pub fn office_args(c: &mut Command, root: &PathBuf, _cx: i32, _cy: i32) {
+        // Opt-in window mode (BAGIDEA_WINDOW=1): run the world as a normal framed
+        // window — no desktop embed. Still keeps the chat head + tray from the
+        // shell. Anything else keeps the original wallpaper behaviour exactly.
+        if std::env::var("BAGIDEA_WINDOW").as_deref() == Ok("1") {
+            c.args(["--path"]).arg(root.join("godot")).args(["--", "--windowed"]);
+            // No DYLD shim: we do NOT want the desktop-level attach in window mode.
+            return;
+        }
         // Stage A: a normal windowed office (the desktop-level embed comes from
         // the DYLD shim in a follow-up). Still passes --wallpaper so the world
         // reports ready the same way.

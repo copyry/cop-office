@@ -4,6 +4,15 @@ All notable changes to BagIdea Office. A **release** is a deliberate `VERSION`
 bump on `main` (see [RELEASING.md](RELEASING.md)) — that's what triggers the
 in-app 🔄 update banner. Versions follow [semver](https://semver.org).
 
+## [Unreleased]
+
+**Added**
+- **🪟 Windowed mode (macOS).** Set `BAGIDEA_WINDOW=1` to run the world as a
+  normal framed, movable 1280×800 window centred on screen — no desktop embed —
+  while still getting the floating chat head + tray from the shell. Opt-in only;
+  unset keeps the original `--wallpaper` desktop behaviour, and Windows is
+  untouched.
+
 ## [0.7.7] — Workflow Builder, louder channels & a sturdier wallpaper
 
 A big update — a whole new way to plan work, channels that talk back, and fixes

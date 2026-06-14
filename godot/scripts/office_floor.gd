@@ -59,12 +59,13 @@ func _ready() -> void:
 	# — flip only after the first real frame is on screen.
 	_opaque_after_first_frame()
 
-	if "--wallpaper" in OS.get_cmdline_user_args():
+	var _args := OS.get_cmdline_user_args()
+	if ("--wallpaper" in _args) or ("--windowed" in _args):
 		# NB: borderless/fullscreen/opaque happen in _opaque_after_first_frame
 		# — touching the window mid-load repaints the splash on black.
-		# Wallpaper rung: 30 fps, NATIVE render + MSAA 2x — the measured sweet
+		# Perf rung: 30 fps, NATIVE render + MSAA 2x — the measured sweet
 		# spot (FSR upscale read as jaggies; 4x MSAA costs +10% GPU for little
-		# visible gain at wallpaper distance).
+		# visible gain). Also wanted in windowed mode on the M2 8GB target.
 		Engine.max_fps = 30
 		get_viewport().scaling_3d_scale = 1.0
 		get_viewport().msaa_3d = Viewport.MSAA_2X
@@ -164,10 +165,27 @@ func _opaque_after_first_frame() -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().transparent_bg = false
 	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_TRANSPARENT, false)
-	if "--wallpaper" in OS.get_cmdline_user_args():
+	var args := OS.get_cmdline_user_args()
+	if "--wallpaper" in args:
 		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
 		DisplayServer.window_set_position(Vector2i.ZERO)
 		DisplayServer.window_set_size(DisplayServer.screen_get_size())
+	elif "--windowed" in args:
+		# Window mode (BAGIDEA_WINDOW=1): a normal framed, movable window —
+		# 1280x800 centred on screen — same handoff as _enter_editor_mode().
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+		var win := Vector2i(1280, 800)
+		DisplayServer.window_set_size(win)
+		var scr := DisplayServer.window_get_current_screen()
+		var sp := DisplayServer.screen_get_position(scr)
+		var ss := DisplayServer.screen_get_size(scr)
+		DisplayServer.window_set_position(sp + (ss - win) / 2)
+		get_window().grab_focus()
+		DisplayServer.window_move_to_foreground()
+		DisplayServer.window_set_title("BagIdea Office")
+		get_tree().create_timer(0.8).timeout.connect(func():
+			DisplayServer.window_set_title("BagIdea Office"))
 	# Signal the shell that the scene is on screen — it holds the WorkerW
 	# attach until now so the transparent splash survives the whole load.
 	var flag := FileAccess.open(
