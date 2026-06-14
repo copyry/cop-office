@@ -1,8 +1,8 @@
 # Migration note — Windowed mode (`BAGIDEA_WINDOW=1`)
 
 > Hand-off note for whoever ports this feature into the other project copy.
-> Goal: run the Godot world as a **normal framed, movable window** (1280×800,
-> centred) while still keeping the shell's floating **chat head + tray** — instead
+> Goal: run the Godot world as a **normal framed, movable window** (3/4 of the
+> screen, centred) while still keeping the shell's floating **chat head + tray** — instead
 > of the borderless desktop-embed wallpaper. Opt-in via env var; original
 > behaviour and the Windows path stay 100% unchanged.
 
@@ -53,11 +53,11 @@ window (mirrors the tail of `_enter_editor_mode()`):
 elif "--windowed" in args:
     DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
     DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
-    var win := Vector2i(1280, 800)
-    DisplayServer.window_set_size(win)
     var scr := DisplayServer.window_get_current_screen()
     var sp := DisplayServer.screen_get_position(scr)
     var ss := DisplayServer.screen_get_size(scr)
+    var win := ss * 3 / 4                    # 3/4 of the screen
+    DisplayServer.window_set_size(win)
     DisplayServer.window_set_position(sp + (ss - win) / 2)
     get_window().grab_focus()
     DisplayServer.window_move_to_foreground()
@@ -87,7 +87,7 @@ cd shell && cargo build --release
 BAGIDEA_WINDOW=1 ./shell/target/release/bagidea-office-shell
 ```
 
-Expect: Godot opens as a bordered 1280×800 window centred on screen, plus the
+Expect: Godot opens as a bordered window at 3/4 of the screen, centred, plus the
 floating chat head and the tray icon. Running without `BAGIDEA_WINDOW` gives the
 original borderless desktop wallpaper.
 

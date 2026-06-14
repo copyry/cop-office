@@ -171,15 +171,15 @@ func _opaque_after_first_frame() -> void:
 		DisplayServer.window_set_position(Vector2i.ZERO)
 		DisplayServer.window_set_size(DisplayServer.screen_get_size())
 	elif "--windowed" in args:
-		# Window mode (BAGIDEA_WINDOW=1): a normal framed, movable window —
-		# 1280x800 centred on screen — same handoff as _enter_editor_mode().
+		# Window mode (BAGIDEA_WINDOW=1): a normal framed, movable window sized
+		# to 3/4 of the screen and centred — same handoff as _enter_editor_mode().
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
-		var win := Vector2i(1280, 800)
-		DisplayServer.window_set_size(win)
 		var scr := DisplayServer.window_get_current_screen()
 		var sp := DisplayServer.screen_get_position(scr)
 		var ss := DisplayServer.screen_get_size(scr)
+		var win := ss * 3 / 4
+		DisplayServer.window_set_size(win)
 		DisplayServer.window_set_position(sp + (ss - win) / 2)
 		get_window().grab_focus()
 		DisplayServer.window_move_to_foreground()
