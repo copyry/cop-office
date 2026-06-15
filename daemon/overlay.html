@@ -2195,12 +2195,200 @@
     };
   }
 
+  // 🤖 AI PROVIDERS — pick the office's active "brain", set each built-in's
+  // model, and manage custom OpenAI-compatible endpoints (add/edit/delete +
+  // drag to reorder = fallback chain). Phase 1: config only — nothing routes a
+  // run on this yet. Renders into #provbox in the CONNECT tab; the overlay theme
+  // is fixed vanilla CSS so this matches the existing channel/key cards.
+  let PROV_CACHE = null;  // last /providers payload — reused by the agent editor
+  async function renderProviders() {
+    const box = document.getElementById("provbox");
+    if (!box) return;
+    const data = await fetch("/providers").then((x) => x.json()).catch(() => null);
+    if (!box.isConnected) return;       // tab switched away while loading
+    if (!data) { box.innerHTML = `<div style="font-size:11px;color:#ff6258">โหลด providers ไม่สำเร็จ</div>`; return; }
+    PROV_CACHE = data;
+    const catalog = data.catalog || [];
+    const cfg = data.config || {};
+    const avail = data.availability || {};
+    const models = cfg.models || {};
+    const custom = cfg.custom || [];
+    const active = cfg.active;
+    box.innerHTML = "";
+
+    // POST a config change then re-render from the fresh server state.
+    const post = async (body) => {
+      const r = await api("/providers", body);
+      if (r && r.ok === false && r.error) addChip("✗ " + r.error);
+      await renderProviders();
+      return r;
+    };
+    // Connectivity probe → write ✅/❌ + found models into a status line.
+    const test = async (providerId, statEl) => {
+      statEl.innerHTML = `<span style="color:var(--dim)">🧪 กำลังทดสอบ…</span>`;
+      const r = await api("/providers/test", { providerId });
+      if (r && r.skipped) { statEl.innerHTML = `<span style="color:var(--dim)">— ${r.note || "ไม่มี endpoint ให้ทดสอบ"}</span>`; return; }
+      if (r && r.ok) {
+        const ms = r.models || [];
+        statEl.innerHTML = `<span style="color:#4ade80">✅ ต่อติด${ms.length ? ` · เจอ ${ms.length} model: ` + ms.slice(0, 4).join(", ") + (ms.length > 4 ? "…" : "") : ""}</span>`;
+      } else {
+        statEl.innerHTML = `<span style="color:#ff6258">❌ ${(r && (r.error || (r.status ? "HTTP " + r.status : ""))) || "ทดสอบไม่สำเร็จ"}</span>`;
+      }
+    };
+    const cardEl = (activeEdge) => {
+      const c = document.createElement("div");
+      c.className = "field";
+      c.style.cssText = "border:1px solid " + (activeEdge ? "var(--accent)" : "var(--line)") +
+        ";border-radius:10px;padding:9px;margin-bottom:8px";
+      return c;
+    };
+    const esc = (s) => String(s || "").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+
+    // ── built-in providers ────────────────────────────────────────────────
+    for (const p of catalog) {
+      const isActive = active === p.id;
+      const ready = !!avail[p.id];
+      const curModel = models[p.id] || p.defaultModel || "";
+      const card = cardEl(isActive);
+      card.innerHTML =
+        `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+           <b style="font-size:12.5px">${p.label}</b>
+           ${p.runtime ? `<span style="font-size:9px;color:var(--accent);border:1px solid var(--line);border-radius:6px;padding:1px 5px">RUNTIME</span>` : ""}
+           <span style="font-size:10px;color:${ready ? "#4ade80" : "#ffb054"}">● ${ready ? "พร้อม" : (p.envKey ? "ต้องตั้ง " + p.envKey : "ไม่พร้อม")}</span>
+           ${isActive
+              ? `<span style="margin-left:auto;font-size:10px;color:var(--accent);font-weight:700">✓ ตัวหลัก</span>`
+              : `<div class="winbtn work setact" style="margin-left:auto" title="ตั้งเป็น provider หลัก">★ ตั้งหลัก</div>`}
+         </div>
+         <div style="display:flex;gap:6px;align-items:center">
+           <select class="pmodel" style="flex:1;margin:0">${p.models.map((m) =>
+             `<option value="${esc(m.id)}"${m.id === curModel ? " selected" : ""}>${m.label}</option>`).join("")}</select>
+           <div class="winbtn ptest" title="ทดสอบการเชื่อมต่อ">🧪</div>
+         </div>
+         <div class="pstat" style="font-size:10.5px;margin-top:5px;min-height:13px"></div>`;
+      const stat = card.querySelector(".pstat");
+      card.querySelector(".pmodel").onchange = (e) => post({ provider: p.id, model: e.target.value });
+      card.querySelector(".ptest").onclick = () => test(p.id, stat);
+      const setb = card.querySelector(".setact");
+      if (setb) setb.onclick = () => post({ active: p.id });
+      box.appendChild(card);
+    }
+
+    // ── custom OpenAI-compatible endpoints (draggable = fallback order) ─────
+    if (custom.length) {
+      const hd = document.createElement("div");
+      hd.style.cssText = "font-size:10px;letter-spacing:1px;color:var(--dim);margin:10px 0 5px";
+      hd.textContent = "⠿ CUSTOM ENDPOINTS — ลากเรียงลำดับ = ลำดับ fallback";
+      box.appendChild(hd);
+    }
+    let dragId = null;
+    const commitOrder = () => {
+      const ids = [...box.querySelectorAll("[data-cid]")].map((el) => el.dataset.cid);
+      post({ reorderCustom: ids });
+    };
+    for (const c of custom) {
+      const isActive = active === c.id;
+      const ready = !!avail[c.id];
+      const card = cardEl(isActive);
+      card.dataset.cid = c.id;
+      card.setAttribute("draggable", "true");
+      card.style.cursor = "grab";
+      card.innerHTML =
+        `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+           <span style="color:var(--dim);font-size:13px;cursor:grab">⠿</span>
+           <b style="font-size:12.5px">${esc(c.label)}</b>
+           <span style="font-size:10px;color:${ready ? "#4ade80" : "#ffb054"}">● ${ready ? "พร้อม" : (c.enabled ? "baseUrl ไม่ถูกต้อง" : "ปิดอยู่")}</span>
+           ${isActive ? `<span style="font-size:10px;color:var(--accent);font-weight:700">✓ ตัวหลัก</span>` : ""}
+           <div class="winbtn pedit" style="margin-left:auto" title="แก้ไข">✎</div>
+           <div class="winbtn hide pdel" title="ลบ">✕</div>
+         </div>
+         <div style="font-size:10.5px;color:var(--dim);word-break:break-all;margin-bottom:5px">
+           ${esc(c.baseUrl)}${c.model ? ` · <span style="color:var(--text)">${esc(c.model)}</span>` : ""}
+           · 🔑 ${c.hasKey ? "ตั้งไว้แล้ว" : "ไม่มี"}</div>
+         <div style="display:flex;gap:6px;align-items:center">
+           <div class="switch pen ${c.enabled ? "on" : ""}" style="margin:0;font-size:11px"><div class="knob"></div> เปิดใช้</div>
+           ${isActive ? "" : `<div class="winbtn work setact" title="ตั้งเป็น provider หลัก">★ ตั้งหลัก</div>`}
+           <div class="winbtn ptest" style="margin-left:auto" title="ทดสอบการเชื่อมต่อ">🧪</div>
+         </div>
+         <div class="pstat" style="font-size:10.5px;margin-top:5px;min-height:13px"></div>`;
+      const stat = card.querySelector(".pstat");
+      card.querySelector(".ptest").onclick = (e) => { e.stopPropagation(); test(c.id, stat); };
+      card.querySelector(".pedit").onclick = (e) => { e.stopPropagation(); openCustomForm(c); };
+      card.querySelector(".pdel").onclick = async (e) => {
+        e.stopPropagation();
+        if (!await confirmDanger(t("ลบ provider") + ": " + c.label,
+            t("ลบ custom endpoint นี้ถาวร"), t("ลบ"))) return;
+        post({ deleteCustom: c.id });
+      };
+      const sw = card.querySelector(".pen");
+      sw.onclick = (e) => { e.stopPropagation(); post({ editCustom: { id: c.id, enabled: !c.enabled } }); };
+      const setb = card.querySelector(".setact");
+      if (setb) setb.onclick = (e) => { e.stopPropagation(); post({ active: c.id }); };
+      // drag-to-reorder within the custom list
+      card.addEventListener("dragstart", () => { dragId = c.id; card.style.opacity = ".4"; });
+      card.addEventListener("dragend", () => { card.style.opacity = ""; });
+      card.addEventListener("dragover", (e) => { e.preventDefault(); });
+      card.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (!dragId || dragId === c.id) return;
+        const dragEl = box.querySelector(`[data-cid="${dragId}"]`);
+        if (dragEl) { box.insertBefore(dragEl, card); commitOrder(); }
+      });
+      box.appendChild(card);
+    }
+
+    // ── add a new custom endpoint ──────────────────────────────────────────
+    const addBtn = document.createElement("button");
+    addBtn.className = "bigbtn";
+    addBtn.textContent = "＋ เพิ่ม custom endpoint";
+    addBtn.onclick = () => openCustomForm(null);
+    box.appendChild(addBtn);
+
+    // Inline add/edit form for a custom endpoint. `cur`=null → add, else edit.
+    function openCustomForm(cur) {
+      const editing = !!cur;
+      const card = cardEl(true);
+      card.innerHTML =
+        `<div style="font-size:11px;color:var(--accent);margin-bottom:7px">${editing ? "✎ แก้ไข endpoint" : "＋ custom endpoint ใหม่ (OpenAI-compatible)"}</div>
+         <input class="f-label" placeholder="ชื่อ เช่น LM Studio (เครื่องในบ้าน)" style="margin-bottom:5px" value="${esc(cur && cur.label)}">
+         <input class="f-url" placeholder="baseUrl เช่น http://192.168.1.20:1234/v1" style="margin-bottom:5px" value="${esc(cur && cur.baseUrl)}">
+         <input class="f-model" placeholder="model เช่น qwen2.5-coder (ตามที่ endpoint มี)" style="margin-bottom:5px" value="${esc(cur && cur.model)}">
+         <input class="f-key" type="password" autocomplete="new-password" style="margin-bottom:5px"
+           placeholder="${editing && cur.hasKey ? "API key — ตั้งไว้แล้ว (เว้นว่าง = คงเดิม)" : "API key (ถ้า endpoint ต้องใช้ · เว้นว่างได้)"}">
+         <div class="switch f-en on" style="font-size:11px"><div class="knob"></div> เปิดใช้</div>
+         <div class="btnrow">
+           <button class="f-cancel">ยกเลิก</button>
+           <button class="primary f-save">💾 บันทึก</button>
+         </div>`;
+      box.appendChild(card);
+      card.scrollIntoView({ block: "nearest" });
+      const sw = card.querySelector(".f-en");
+      sw.onclick = () => sw.classList.toggle("on");
+      card.querySelector(".f-cancel").onclick = () => renderProviders();
+      card.querySelector(".f-save").onclick = () => {
+        const entry = {
+          label: card.querySelector(".f-label").value.trim(),
+          baseUrl: card.querySelector(".f-url").value.trim(),
+          model: card.querySelector(".f-model").value.trim(),
+          enabled: sw.classList.contains("on"),
+        };
+        const key = card.querySelector(".f-key").value;
+        if (!entry.baseUrl) return addChip("ต้องใส่ baseUrl (http/https)");
+        // On edit, only send apiKey when the owner typed a new one (blank keeps
+        // the stored key — backend merges omitted fields).
+        if (key) entry.apiKey = key;
+        if (editing) post({ editCustom: { id: cur.id, ...entry } });
+        else { if (!key) delete entry.apiKey; post({ addCustom: { ...entry, apiKey: key || "" } }); }
+      };
+    }
+  }
+
   // 🔗 CONNECT: API key vault + external channel connectors.
   async function renderConnectTab() {
     const regAll = await fetch("/registry").then((x) => x.json()).catch(() => ({}));
     const chStatus = await fetch("/channels/status").then((x) => x.json()).catch(() => ({}));
     const klist = modalCard.querySelector("#klist");
     if (!klist) return;  // tab switched away while loading
+    renderProviders();  // 🤖 AI providers section (loads its own data async)
     // ── MAIN keys: dedicated, labeled, feature-aware.
     const MAINS = [
       ["OPENAI_API_KEY", "OpenAI", "🎤 ถอดเสียง (Whisper) · 🖼 สร้างภาพ", "platform.openai.com/api-keys"],
@@ -2393,6 +2581,8 @@
       bodyHtml = `
         <div class="field"><label>⭐ MAIN API KEYS — กุญแจหลักของโปรแกรม (ปลดล็อกฟีเจอร์เสียง · TTS · รูปภาพ · realtime)</label>
           <div id="mainkeys"></div></div>
+        <div class="field"><label>🤖 AI PROVIDERS — สมองของ agents · เลือกตัวหลัก + model · ต่อ endpoint เครื่องอื่นเองได้ (ลำดับ custom = ลำดับ fallback)</label>
+          <div id="provbox"><div style="font-size:11px;color:var(--dim)">กำลังโหลด…</div></div></div>
         <div class="field"><label>🔑 API KEYS เพิ่มเติม — ฉีดเข้า env ของ agent ทุกตัว (เช่น GEMINI2 ให้ agents ใช้แยกจาก key หลัก)</label>
           <div id="klist"></div>
           <div class="assistrow" style="margin-top:8px">
@@ -2661,7 +2851,7 @@
     };
   }
 
-  function openEditor(id) {
+  async function openEditor(id) {
     modal.classList.add("open");
     const a = id ? ROSTER[id] : { name: "", role: REGROLES[2] || "Specialist", avatar: 1, prompt: "" };
     const isUser = !!a.isUser;  // the CEO is YOU — no prompt/skills/tools
@@ -2701,6 +2891,11 @@
          <div class="assistrow">
            <select id="eVoice" style="flex:1"></select>
            <button class="send" id="eVoicePlay" title="ฟังตัวอย่างเสียงนี้">▶</button>
+         </div></div>
+       <div class="field"><label>🤖 AI MODEL — สมองของ agent นี้ (default = ใช้ provider หลักของออฟฟิศ · ตั้งใน ⚙ CONNECT)</label>
+         <div class="assistrow">
+           <select id="eProvider" style="flex:0 0 44%"><option value="default">⭐ ตามออฟฟิศ (default)</option></select>
+           <input id="eModel" maxlength="80" placeholder="model (เว้นว่าง = ค่าเริ่มต้นของ provider)">
          </div></div>
        <div class="field"><label>🎯 SKILLS</label><div class="checks" id="eSkills"></div></div>
        <div class="field"><label>🔧 TOOLS (ว่าง = ชุดอ่านอย่างเดียว Read/Glob/Grep)</label><div class="checks" id="eTools"></div></div>`;
@@ -2832,6 +3027,25 @@
         roleSel.appendChild(o);
       }
       roleSel.value = a.role;
+      // 🤖 per-agent provider override (default = office active). Provider is a
+      // dropdown (built-ins + custom); model is free-text (endpoints vary).
+      const provSel = modalCard.querySelector("#eProvider");
+      const modelInp = modalCard.querySelector("#eModel");
+      if (provSel) {
+        modelInp.value = a.model || "";
+        const fill = (data) => {
+          const all = [...(data.catalog || []),
+            ...((data.config && data.config.custom) || []).map((c) => ({ id: c.id, label: c.label + " (custom)" }))];
+          for (const p of all) {
+            const o = document.createElement("option");
+            o.value = p.id; o.textContent = p.label;
+            provSel.appendChild(o);
+          }
+          provSel.value = (a.provider && all.some((p) => p.id === a.provider)) ? a.provider : "default";
+        };
+        const data = PROV_CACHE || await fetch("/providers").then((x) => x.json()).catch(() => null);
+        if (data) { PROV_CACHE = data; fill(data); }
+      }
       modalCard.querySelector("#eTier").value = String(a.tier || (id === "main" ? 2 : 3));
       modalCard.querySelector("#ePrompt").value = a.prompt || "";
       modalCard.querySelector("#eExpertise").value = px.expertise || "";
@@ -2874,6 +3088,8 @@
             prompt: modalCard.querySelector("#ePrompt").value,
             tier: Number(modalCard.querySelector("#eTier").value) || 3,
             voice: (modalCard.querySelector("#eVoice") || {}).value || "",
+            provider: (modalCard.querySelector("#eProvider") || {}).value || "default",
+            model: (modalCard.querySelector("#eModel") || {}).value.trim() || "",
             persona: {
               expertise: modalCard.querySelector("#eExpertise").value,
               personality: modalCard.querySelector("#ePersonality").value,
@@ -4357,6 +4573,17 @@
       const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(ae.tagName) && modalCard.contains(ae);
       if (modal.classList.contains("open") && modalCard.querySelector("#jlist") && !typing)
         openOps("jobs");
+      return;
+    }
+    if (ev.type === "providers.changed") {
+      // LLM provider config changed somewhere — drop the cache and live-refresh
+      // the AI Providers card if CONNECT is open and the owner isn't mid-typing
+      // in one of its own fields (e.g. editing a custom endpoint).
+      PROV_CACHE = null;
+      const ae = document.activeElement || {};
+      const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(ae.tagName) && modalCard.contains(ae);
+      if (modal.classList.contains("open") && document.getElementById("provbox") && !typing)
+        renderProviders();
       return;
     }
     if (ev.type === "editor.opening") {
