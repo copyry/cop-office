@@ -58,6 +58,40 @@ in-app 🔄 update banner. Versions follow [semver](https://semver.org).
   overlay/popup chat webviews (a standard Edit menu is installed at startup);
   previously paste silently did nothing on macOS.
 
+## [0.7.19] — Workflow Builder: English-first & right-click to add a node
+
+**Changed**
+- **The bundled workflow examples are now all in English** — a clean, global
+  default. (Write your own flows in any language you like; the examples just set
+  the standard.)
+- **No more stray Thai** in the Workflow Builder when the office is in English —
+  the new-workflow starter node follows your language too.
+
+**Added**
+- **Right-click the canvas to add a node right there.** A ＋ Node menu pops up at
+  your cursor and drops the node where you clicked — no hunting for it.
+
+## [0.7.18] — The display menu is always there
+
+**Changed**
+- **The 🖥 Display menu now always shows** (in the ⋯ menu), listing exactly the
+  screens the office detected — one monitor shows one (ticked), two show two, and
+  so on. Switching still remembers your choice and restarts to apply it.
+
+## [0.7.17] — Real multi-monitor detection, its own menu & a tray Restart
+
+**Changed**
+- **The display picker is now its own menu**, separate from atmosphere — and it
+  only appears when you actually have more than one monitor.
+- **Monitors are detected for real.** No more phantom “Display 2/3” on a single
+  screen. On a multi-monitor PC the office auto-places the wallpaper on your
+  primary screen from the first launch, and lists exactly the screens you have.
+- **Switching screens restarts the office for you** — no need to type
+  `bagidea restart`; it re-attaches to the chosen monitor automatically.
+
+**Added**
+- **A “Restart office” item in the tray menu**, right where you’d expect it.
+
 ## [0.7.16] — One-click install straight from the website
 
 **Added**
