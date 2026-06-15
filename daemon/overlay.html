@@ -795,6 +795,7 @@
 <div id="moreMenu">
   <div class="opt" id="pluginBtn">🧩 <span>Plugins</span></div>
   <div class="opt" id="workflowBtn">🔀 <span>Workflow Builder</span></div>
+  <div class="opt" id="toolshubBtn">🧰 <span>Tools Hub</span></div>
   <div class="opt" id="editBtn">🎨 <span>จัดออฟฟิศ</span></div>
   <div class="opt" id="discussBtn">🗣 <span>ประชุม agents</span></div>
   <div class="opt" id="mapBtn">🗺 <span>แผนที่</span></div>
@@ -2911,6 +2912,11 @@
     document.getElementById("moreMenu").classList.remove("open");
     popWindow("/workflow", "🔀 Workflow Builder", "workflow", { w: 1120, h: 740 });
   };
+  // 🧰 Tools Hub — curated MCP catalog (browser/Google/DB…), its own window
+  document.getElementById("toolshubBtn").onclick = () => {
+    document.getElementById("moreMenu").classList.remove("open");
+    popWindow("/toolshub", "🧰 Tools Hub", "toolshub", { w: 860, h: 720 });
+  };
   // 🎨 opens the full standalone 3D editor window (the daemon launches Godot).
   document.getElementById("editBtn").onclick = () => {
     api("/editor/open", {});
@@ -2944,15 +2950,15 @@
       row.innerHTML = `<div class="meta"><b>${p.name}</b>
           <span>${(p.description || "").replace(/</g, "&lt;")} · v${p.version || "?"}` +
         (p.commands.length ? ` · ${p.commands.length} คำสั่ง` : "") + `</span></div>` +
-        (p.panel ? `<div class="winbtn" title="เปิดแผง">▶</div>` : "") +
-        (p.panel && shellPost ? `<div class="winbtn" title="เปิดเป็นหน้าต่างแยก">⤢</div>` : "") +
+        (p.panel ? `<div class="winbtn" title="เปิดหน้าต่าง">⤢</div>` : "") +
         (p.core ? `<span class="hide" title="plugin หลัก ลบไม่ได้" style="opacity:.5;font-size:13px;align-self:center">🔒</span>`
                 : `<div class="winbtn hide" title="ถอนการติดตั้ง">🗑</div>`);
-      const openBtn = row.querySelector('[title="เปิดแผง"]');
-      if (openBtn) openBtn.onclick = () => openPluginPanel(p);
-      else if (!p.panel) row.style.cursor = "default";
-      const winBtn = row.querySelector('[title="เปิดเป็นหน้าต่างแยก"]');
-      if (winBtn) winBtn.onclick = () => openPluginWindow(p);
+      // One mode only: a plugin panel opens as its OWN window (click the row or
+      // the button). No in-modal panel — so it can't be open two ways at once.
+      const openBtn = row.querySelector('[title="เปิดหน้าต่าง"]');
+      if (openBtn) openBtn.onclick = (e) => { e.stopPropagation(); openPluginWindow(p); };
+      if (p.panel) row.onclick = () => openPluginWindow(p);
+      else row.style.cursor = "default";
       const del = row.querySelector('[title="ถอนการติดตั้ง"]');
       if (del) del.onclick = () => api("/plugins/remove", { id: p.id }).then(() => openPlugins());
       box.appendChild(row);
@@ -2981,8 +2987,12 @@
       "&key=" + encodeURIComponent(key || "") +
       "&w=" + (win.w || 900) + "&h=" + (win.h || 680) +
       "&resizable=" + (win.resizable === false ? 0 : 1);
-    if (shellPost) shellPost("open-window:" + u);
-    else window.open(src, "_blank");
+    if (shellPost) {
+      shellPost("open-window:" + u);
+      // tuck the chat panel away (like the 3D Editor) so it doesn't cover the
+      // new window — the chat head stays; click it to bring the chat back.
+      if (!document.body.classList.contains("feedmode")) shellPost("hide");
+    } else window.open(src, "_blank");
   }
   function openPluginWindow(p) {
     popWindow("/plugin/" + p.id + "/panel", p.name, "plugin:" + p.id, p.window);
@@ -4417,16 +4427,23 @@
   }
 
   // Media nodes for chat bubbles (uploads + agent-produced files).
+  // Park the chat panel off-screen (the chat head stays — click it to bring the
+  // chat back) so a newly-opened window/folder isn't covered. Mirrors the Editor.
+  function tuckChat() {
+    if (shellPost && !document.body.classList.contains("feedmode")) shellPost("hide");
+  }
   function revealInFolder(realPath) {
     fetch("/reveal", { method: "POST",
       headers: { "content-type": "application/json", "x-bagidea-ui": "1" },
       body: JSON.stringify({ path: realPath }) }).catch(() => {});
+    tuckChat();  // get the chat out of the way of the OS file window
   }
   // Open the file in the OS default app — a real separate, resizable window.
   function openExternal(realPath) {
     fetch("/open", { method: "POST",
       headers: { "content-type": "application/json", "x-bagidea-ui": "1" },
       body: JSON.stringify({ path: realPath }) }).catch(() => {});
+    tuckChat();  // the image now lives in its own OS window
   }
   function mediaNode(url, kind, name, realPath) {
     let el;

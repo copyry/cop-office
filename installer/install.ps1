@@ -148,6 +148,26 @@ if (Have "claude") { Skip "already installed" }
 elseif (Have "npm") { Write-Host "      installing via npm (about a minute)..." -ForegroundColor DarkGray; npm install -g @anthropic-ai/claude-code; Sync-Path; Ok "installed - log in later by running: claude" }
 else { Warn "npm not on PATH yet - reopen a terminal and run: npm install -g @anthropic-ai/claude-code" }
 
+# ---- handy CLI tools the agents can use (optional, best-effort) ---------------
+# Each is installed via winget if missing; a failure is fine — agents just skip
+# whatever isn't present. These widen what the office can actually DO (media,
+# docs, data, GitHub) without writing any new code.
+Write-Host "`n  [+] Handy CLI tools for agents (gh, ffmpeg, yt-dlp, pandoc, jq, ImageMagick - optional)" -ForegroundColor Cyan
+foreach ($t in @(
+    @{ id = "GitHub.cli";               cmd = "gh" },
+    @{ id = "Gyan.FFmpeg";              cmd = "ffmpeg" },
+    @{ id = "yt-dlp.yt-dlp";            cmd = "yt-dlp" },
+    @{ id = "jqlang.jq";                cmd = "jq" },
+    @{ id = "JohnMacFarlane.Pandoc";    cmd = "pandoc" },
+    @{ id = "ImageMagick.ImageMagick";  cmd = "magick" }
+  )) {
+  if (Have $t.cmd) { Write-Host "      - $($t.cmd) already present" -ForegroundColor DarkGray; continue }
+  Write-Host "      - installing $($t.cmd)..." -ForegroundColor DarkGray
+  try { winget.exe install --id $t.id -e --silent --accept-package-agreements --accept-source-agreements | Out-Null } catch {}
+}
+Sync-Path
+Ok "CLI tools step done (any that failed are optional)"
+
 # ---- stop a running instance first -------------------------------------------
 # A re-install while the office is open locks the very files we update + rebuild
 # + re-brand below (git reset, the shell exe, the branded BagIdeaOffice.exe) ->

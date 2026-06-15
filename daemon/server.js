@@ -105,11 +105,25 @@ function staffCount() {
 }
 
 // ---- Workflow Builder (human-language nodes the Director analyzes) ----------
-// Flow is read top→bottom by node Y on the canvas, so no explicit edges needed.
+// Nodes form a graph via edges (A → B = do B after A). A node with several
+// outgoing edges = parallel branches; several incoming = wait for all, then
+// continue. Falls back to top→bottom by Y when no edges are drawn.
 function workflowToText(w) {
-  const nodes = (w.nodes || []).slice().sort((a, b) => (a.y || 0) - (b.y || 0));
-  let s = `Workflow: ${w.name || "(untitled)"}\nSteps (in order):\n`;
-  nodes.forEach((n, i) => { s += `${i + 1}. [${n.type || "step"}] ${(n.text || "").trim()}\n`; });
+  const nodes = w.nodes || [];
+  const edges = w.edges || [];
+  const byId = {}; for (const n of nodes) byId[n.id] = n;
+  const label = (id) => { const n = byId[id]; return n ? `[${n.type || "step"}] ${(n.text || "").trim()}` : id; };
+  let s = `Workflow: ${w.name || "(untitled)"}\n\nSteps:\n`;
+  nodes.slice().sort((a, b) => (a.y || 0) - (b.y || 0))
+    .forEach((n, i) => { s += `(${i + 1}) ${label(n.id)}\n`; });
+  if (edges.length) {
+    s += "\nFlow (A → B = do B after A; a node with several outgoing arrows runs those " +
+      "branches in PARALLEL; a node with several incoming arrows WAITS for all of them " +
+      "before continuing):\n";
+    for (const e of edges) s += `- ${label(e.from)}  →  ${label(e.to)}\n`;
+  } else {
+    s += "\n(No connections drawn — treat the steps in order, top to bottom.)\n";
+  }
   return s;
 }
 const WORKFLOW_ANALYZE_PROMPT = [
@@ -357,18 +371,20 @@ if (!fs.existsSync(OFFICE_MD)) {
   } catch {}
 }
 
-// 🔀 First run: drop example workflows into workspace/workflows so users have
-// something to open + learn from. Seeds ONLY when the folder is empty — never
-// overwrites the user's own workflows.
-(function seedWorkflowExamples() {
+// 🔀 One-time cleanup: older versions SEEDED example workflows into
+// workspace/workflows. Examples now live read-only in the bundle, so drop any
+// stale workspace copies (id starts with "example-") to avoid duplicates. The
+// user's own workflows (wf_* ids) are left untouched.
+(function dropSeededExamples() {
   try {
     const dir = path.join(WORKSPACE, "workflows");
-    fs.mkdirSync(dir, { recursive: true });
-    if (fs.readdirSync(dir).some((f) => f.endsWith(".json"))) return;
-    const src = path.join(__dirname, "workflow-examples");
-    for (const f of fs.readdirSync(src))
-      if (f.endsWith(".json")) fs.copyFileSync(path.join(src, f), path.join(dir, f));
-    console.log("[workflows] seeded example workflows");
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        const w = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+        if (String(w.id || "").startsWith("example-")) fs.unlinkSync(path.join(dir, f));
+      } catch {}
+    }
   } catch {}
 })();
 
@@ -1729,7 +1745,14 @@ function ttsSpeak(presetId, text) {
     const p = VOICE_PRESETS[presetId];
     if (!p) return reject(new Error("ไม่รู้จักเสียง: " + presetId));
     const body = JSON.stringify({
-      contents: [{ parts: [{ text: `${p.style}: "${String(text).slice(0, 900)}"` }] }],
+      // Global delivery direction on top of each preset's style — pushes the
+      // voices toward a lively, expressive anime feel with natural intonation
+      // (emotion, light pacing, never flat/robotic).
+      contents: [{ parts: [{ text:
+        `Perform this line as a charming, expressive anime character — ${p.style}. ` +
+        `Use natural human intonation and real emotion, with a little life and warmth, ` +
+        `never flat or robotic. Don't read these directions aloud. Say only:\n` +
+        `"${String(text).slice(0, 900)}"` }] }],
       generationConfig: {
         responseModalities: ["AUDIO"],
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.voice } } },
@@ -2313,6 +2336,13 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     try { res.end(fs.readFileSync(path.join(__dirname, "workflow.html"))); }
     catch { res.end("<p>workflow builder unavailable</p>"); }
+
+  } else if (req.method === "GET" && req.url.split("?")[0] === "/toolshub") {
+    // Tools Hub — a curated MCP-server catalog (browser, Google, DB…) to add new
+    // agent capabilities in one click.
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    try { res.end(fs.readFileSync(path.join(__dirname, "toolshub.html"))); }
+    catch { res.end("<p>tools hub unavailable</p>"); }
 
   } else if (req.method === "GET" && /^\/brand\/logo[a-z_]*\.png$/.test(req.url)) {
     const f = path.join(__dirname, "..", "godot", "assets", "brand", req.url.split("/").pop());
@@ -3468,19 +3498,36 @@ const server = http.createServer((req, res) => {
     });
 
   } else if (req.method === "GET" && req.url === "/workflows") {
-    const dir = path.join(WORKSPACE, "workflows");
-    let list = [];
-    try {
-      list = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => {
-        try { const w = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
-          return { id: f.replace(/\.json$/, ""), name: w.name || f, nodes: (w.nodes || []).length }; }
-        catch { return null; }
-      }).filter(Boolean);
-    } catch {}
-    res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(list));
+    // Bundled read-only examples (daemon/workflow-examples) + the user's own
+    // workflows (workspace/workflows). Examples can't be edited/deleted.
+    const out = [];
+    const scan = (base, example) => {
+      try {
+        for (const f of fs.readdirSync(base)) {
+          if (!f.endsWith(".json")) continue;
+          try { const w = JSON.parse(fs.readFileSync(path.join(base, f), "utf8"));
+            out.push({ id: w.id || f.replace(/\.json$/, ""), name: w.name || f,
+              nodes: (w.nodes || []).length, example }); } catch {}
+        }
+      } catch {}
+    };
+    scan(path.join(__dirname, "workflow-examples"), true);
+    scan(path.join(WORKSPACE, "workflows"), false);
+    res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(out));
 
   } else if (req.method === "GET" && req.url.startsWith("/workflows/get")) {
     const id = (new URL(req.url, "http://x").searchParams.get("id") || "").replace(/[^\w-]/g, "");
+    if (id.startsWith("example-")) {
+      try {
+        const ex = path.join(__dirname, "workflow-examples");
+        for (const f of fs.readdirSync(ex)) {
+          if (!f.endsWith(".json")) continue;
+          const raw = fs.readFileSync(path.join(ex, f), "utf8");
+          try { if (JSON.parse(raw).id === id) { res.writeHead(200, { "content-type": "application/json" }); return res.end(raw); } } catch {}
+        }
+      } catch {}
+      res.writeHead(404); return res.end("{}");
+    }
     try { res.writeHead(200, { "content-type": "application/json" });
       res.end(fs.readFileSync(path.join(WORKSPACE, "workflows", id + ".json"))); }
     catch { res.writeHead(404); res.end("{}"); }
@@ -3488,7 +3535,9 @@ const server = http.createServer((req, res) => {
   } else if (req.method === "POST" && req.url === "/workflows/save") {
     readBody(req, (body) => { try {
       const w = JSON.parse(body || "{}");
-      const id = String(w.id || ("wf_" + Date.now())).replace(/[^\w-]/g, "");
+      let id = String(w.id || "").replace(/[^\w-]/g, "");
+      // Never overwrite a read-only example — saving one forks a new user copy.
+      if (!id || id.startsWith("example-")) id = "wf_" + Date.now();
       const dir = path.join(WORKSPACE, "workflows"); fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, id + ".json"),
         JSON.stringify({ id, name: w.name || "Workflow", nodes: w.nodes || [], edges: w.edges || [] }, null, 2));
@@ -3498,7 +3547,7 @@ const server = http.createServer((req, res) => {
   } else if (req.method === "POST" && req.url === "/workflows/delete") {
     readBody(req, (body) => { try {
       const id = String(JSON.parse(body || "{}").id || "").replace(/[^\w-]/g, "");
-      if (id) fs.unlinkSync(path.join(WORKSPACE, "workflows", id + ".json"));
+      if (id && !id.startsWith("example-")) fs.unlinkSync(path.join(WORKSPACE, "workflows", id + ".json"));
     } catch {} res.writeHead(200); res.end("ok"); });
 
   } else if (req.method === "POST" && req.url === "/workflows/analyze") {
@@ -3516,6 +3565,55 @@ const server = http.createServer((req, res) => {
           },
         });
       });
+    } catch (e) { res.writeHead(400); res.end(String(e.message)); } });
+
+  } else if (req.method === "POST" && req.url === "/workflows/run") {
+    // Run the workflow NOW — hand it to the Director as an order (full DELEGATE
+    // power), and ride the result back.
+    readBody(req, (body) => { try {
+      const w = JSON.parse(body || "{}");
+      queueDirectorTurn((release) => {
+        ceoFlow(
+          "Execute this workflow now. Do each step in order. When a node has SEVERAL " +
+          "OUTGOING arrows, those branches run in PARALLEL — and you must REALLY run " +
+          "them in parallel by ending your reply with one `SUB: <branch task>` line per " +
+          "branch (they become real ghost clones the owner can watch split off). Do NOT " +
+          "just say you split — emit the SUB: lines. A node with several incoming arrows " +
+          "waits for all branches, then continues from their merged results. Report the " +
+          "final result.\n\n" + workflowToText(w),
+          undefined, undefined,
+          { logPrompt: "🔀▶ รัน workflow: " + (w.name || ""),
+            onDone: (out, ok) => {
+              release();
+              res.writeHead(200, { "content-type": "application/json" });
+              res.end(JSON.stringify({ ok: !!ok, result: ok && out ? out : "รันไม่สำเร็จ ลองใหม่อีกครั้ง" }));
+            } });
+      });
+    } catch (e) { res.writeHead(400); res.end(String(e.message)); } });
+
+  } else if (req.method === "POST" && req.url === "/workflows/skill") {
+    // Compile the workflow into a reusable SKILL — then it can be assigned to an
+    // agent (Settings → agent → tick the skill) and triggered on demand.
+    readBody(req, (body) => { try {
+      const w = JSON.parse(body || "{}");
+      const nm = String(w.name || "Workflow").slice(0, 50);
+      const id = ("wf-" + slugId(nm)).slice(0, 50);
+      reg.skills[id] = {
+        name: ("🔀 " + nm).slice(0, 60),
+        description: ("Run the saved workflow: " + nm).slice(0, 200),
+        content: ("When asked to run \"" + nm + "\", follow this workflow exactly:\n\n" +
+          workflowToText(w) +
+          "\nDo the steps in order. For a node with several OUTGOING arrows, REALLY run " +
+          "the branches in parallel by ending the reply with one `SUB: <branch task>` line " +
+          "per branch (they become real ghost clones) — don't just describe splitting. At " +
+          "a node with several incoming arrows, wait for all branches then continue from " +
+          "their merged results. Report the final result clearly.").slice(0, 4000),
+      };
+      saveReg();
+      try { if (retrievalOk) { retrieval.reindexSkill(id, reg.skills[id]); retrieval.persist(); } } catch {}
+      pushRoster();
+      broadcast({ type: "skill.created", agent: "", skill: reg.skills[id].name });
+      res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ id, name: reg.skills[id].name }));
     } catch (e) { res.writeHead(400); res.end(String(e.message)); } });
 
   } else if (req.method === "POST" && req.url === "/event") {

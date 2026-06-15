@@ -619,36 +619,18 @@ mod platform {
                 }
             }
             SetParent(godot, workerw);
-            // Cover the chosen monitor in WorkerW coords (fixes multi-monitor:
-            // the window used to keep its primary-size guess at (0,0) and miss
-            // the target screen entirely).
-            position_wallpaper(godot, &root);
-            let _ = proxy.send_event(UserEvent::WorldReady);
-
-            // Re-pin watcher (issue #7): a desktop click can pop our window out
-            // of WorkerW (reparented or hidden), so the office vanishes until a
-            // manual Hide-toggle / restart. Re-assert parent + visibility when it
-            // drifts — cheap (a no-op while everything is fine).
-            use windows_sys::Win32::UI::WindowsAndMessaging::{GetParent, IsWindow};
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(1200));
-                if IsWindow(godot) == 0 {
-                    break; // renderer gone — stop watching
-                }
-                if WALLPAPER_HIDDEN.load(std::sync::atomic::Ordering::SeqCst) {
-                    continue; // user hid the office on purpose — leave it hidden
-                }
-                let mut ww: HWND = 0 as HWND;
-                EnumWindows(Some(find_workerw_cb), &mut ww as *mut HWND as _);
-                if ww == 0 as HWND {
-                    continue;
-                }
-                if GetParent(godot) != ww || IsWindowVisible(godot) == 0 {
-                    SetParent(godot, ww);
-                    ShowWindow(godot, SW_SHOW);
-                    position_wallpaper(godot, &root);
-                }
+            // By DEFAULT do nothing more — just like the original code that stayed
+            // pinned through Win+D / desktop clicks. Reposition ONLY when the user
+            // explicitly picked a monitor (multi-monitor); moving/poking the embed
+            // otherwise regressed it (the wallpaper vanished on Win+D). No watcher.
+            let monitor_chosen =
+                std::fs::read_to_string(root.join("daemon").join("monitor.txt"))
+                    .ok().map(|s| !s.trim().is_empty()).unwrap_or(false)
+                || std::env::var("BAGIDEA_MONITOR").map(|s| !s.trim().is_empty()).unwrap_or(false);
+            if monitor_chosen {
+                position_wallpaper(godot, &root);
             }
+            let _ = proxy.send_event(UserEvent::WorldReady);
         });
     }
 
@@ -1622,6 +1604,16 @@ fn main() {
                             .build(target)
                             .expect("popup window");
                         let id = win.id();
+                        // Center on the primary monitor — otherwise the OS scatters
+                        // popups to inconsistent spots each time.
+                        if let Some(m) = win.primary_monitor() {
+                            let ms = m.size();
+                            let mp = m.position();
+                            let ws = win.outer_size();
+                            let cx = mp.x + ((ms.width as i32 - ws.width as i32) / 2).max(0);
+                            let cy = mp.y + ((ms.height as i32 - ws.height as i32) / 2).max(0);
+                            win.set_outer_position(tao::dpi::PhysicalPosition::new(cx, cy));
+                        }
                         let pproxy = proxy.clone();
                         match platform::webview_extras(
                             WebViewBuilder::new()

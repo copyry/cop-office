@@ -8,10 +8,83 @@ in-app 🔄 update banner. Versions follow [semver](https://semver.org).
 
 **Added**
 - **🪟 Windowed mode (macOS).** Set `BAGIDEA_WINDOW=1` to run the world as a
-  normal framed, movable 1280×800 window centred on screen — no desktop embed —
+  normal framed, movable window (3/4 of the screen, centred) — no desktop embed —
   while still getting the floating chat head + tray from the shell. Opt-in only;
   unset keeps the original `--wallpaper` desktop behaviour, and Windows is
   untouched.
+
+**Fixed**
+- **macOS clipboard shortcuts in the overlay.** ⌘X/⌘C/⌘V/⌘A now work inside the
+  overlay/popup chat webviews (a standard Edit menu is installed at startup);
+  previously paste silently did nothing on macOS.
+
+## [0.7.11] — Workflow polish, centered windows, real ghost-splits & a fuller Tools Hub
+
+**Fixed**
+- **Workflow side panel no longer overflows.** Long analysis/run output now scrolls
+  inside its box, so the Run / Save-as-Skill buttons stay put.
+- **Workflows really split into ghosts.** When a flow has parallel branches, the
+  team now actually spawns visible ghost clones (via the SUB protocol) instead of
+  only *saying* it split.
+
+**Changed**
+- **Pop-out windows open centered** on screen (plugins, Workflow Builder, Tools
+  Hub) instead of scattering to inconsistent spots.
+- **Tools Hub is fuller** — 15 ready MCP servers plus an **“Add your own MCP”**
+  box so you can install any server by pasting its command.
+
+## [0.7.10] — Fix the Plugins “open” button
+
+**Fixed**
+- The Plugins panel's open button rendered cramped/broken (the “⤢ เปิด” icon+label
+  overflowed the small icon button). It's a clean ⤢ icon again — click it or the
+  row to open the plugin in its own window.
+
+## [0.7.9] — Workflows you can run, a richer Tools Hub & full-language windows
+
+**Added**
+- **Workflows do things now.** After you build a flow, **▶️ Run now** hands it to
+  the team to execute (with parallel branches & “wait for all” merges), and **🧠
+  Save as Skill** turns it into a reusable skill you assign to an agent (or just
+  tell an agent to “run &lt;name&gt;”). Dragging to connect nodes is fixed.
+- **Workflow tabs + read-only examples.** Open several workflows in tabs and
+  switch between them. **7 worked examples** (basic→advanced: PDF summary, GitHub
+  triage, competitor watch, research→draft→review…) are read-only templates —
+  save one to fork your own editable copy. Your test workflows are kept clean.
+- **Tools Hub: more & clearer.** 12 popular MCP servers (Browser, Memory,
+  Sequential-Thinking, Filesystem, Fetch, GitHub, Google Workspace, Google Maps,
+  Brave Search, Postgres, Slack, Notion), installed ones grouped on top, plus a
+  plain-language **“What is MCP?”** explainer and how-to.
+
+**Changed**
+- **New windows speak your language.** The Workflow Builder and Tools Hub now
+  follow the office language (Thai/English; other languages fall back to English)
+  instead of always showing Thai.
+- **Plugins open one way** — as their own window (so they can't be open two ways
+  at once), and the chat tucks aside for any new window / opened image or folder.
+- **Warmer agent voices** — every spoken line now carries a lively, natural,
+  anime-flavored delivery instead of a flat read.
+
+## [0.7.8] — Visual Workflow canvas, Tools Hub & a wallpaper-stability fix
+
+**Fixed**
+- **Wallpaper no longer vanishes on Win+D / desktop click.** A v0.7.7 change
+  (multi-monitor repositioning + a re-pin watcher) regressed the embed on some
+  setups, making the office disappear when showing the desktop. Reverted to the
+  original rock-solid embed; the monitor reposition now only runs when you've
+  explicitly picked a monitor. **Recommended update for anyone on v0.7.7.**
+
+**Added**
+- **🔀 Workflow Builder is now a real graph canvas** (n8n-style): pan, zoom,
+  draw arrows between nodes, **branch one→many (parallel) and merge many→one
+  (wait for all)** — not just a top-to-bottom list. The Director's analysis
+  understands the branches and merges.
+- **🧰 Tools Hub** (⋯ menu → Tools Hub): a one-click MCP-server catalog —
+  **Browser automation (Playwright)** so agents can open & drive a real browser
+  for you, plus Web Fetch, Filesystem, GitHub, Slack, Google Workspace.
+- **Bundled CLI tools** for agents: the installer now sets up `gh`, `ffmpeg`,
+  `yt-dlp`, `jq`, `pandoc` and ImageMagick (best-effort), widening what the
+  office can actually do.
 
 ## [0.7.7] — Workflow Builder, louder channels & a sturdier wallpaper
 
