@@ -1370,6 +1370,17 @@ function relayProgress(origin, line) {
     if (msg) try { origin.reply(msg); } catch (e) { console.error("[progress]", e.message); }
   }, wait);
 }
+// Send any progress lines still sitting in the coalescing buffer RIGHT NOW, so a
+// queued "✅ …เสร็จแล้ว" ping lands BEFORE the full summary that follows it.
+function flushProgress(origin) {
+  if (!origin) return;
+  if (origin.timer) { clearTimeout(origin.timer); origin.timer = null; }
+  if (!origin.pending || !origin.pending.length) return;
+  const msg = origin.pending.join("\n");
+  origin.pending = [];
+  origin.lastFlush = Date.now();
+  if (msg) try { origin.reply(msg); } catch (e) { console.error("[progress]", e.message); }
+}
 const agentName = (id) => (reg.agents[id] || { name: id }).name;
 
 // DELEGATE:-line parser shared by the CEO order and every report-back turn.
@@ -1478,12 +1489,22 @@ function reportToMain(fromId, text, ok, depth, session, origin) {
       filterText: depth < 2
         ? makeDelegateFilter(depth + 1, session, () => { delegatedMore = true; }, origin)
         : undefined,
-      onDone: (_finalText, fOk) => {
+      onDone: (finalText, fOk) => {
         originRelease(origin);
         release();
-        // No further hand-offs → that WAS the summary: walk it to the boss.
-        if (!delegatedMore && fOk)
+        // No further hand-offs → that WAS the summary: walk it to the boss AND
+        // ride it back to the channel that placed the order. The initial plan
+        // already rode out via ceoFlow's onDone; this is the missing result.
+        // origin.reply directly (not relayProgress) so it survives noProgress
+        // mode and isn't truncated to 5 progress lines. flush first so the
+        // "✅ …เสร็จแล้ว" ping lands before the summary.
+        if (!delegatedMore && fOk) {
           broadcast({ type: "ceo.report", agent: "main" });
+          if (origin && finalText) {
+            flushProgress(origin);
+            try { origin.reply(finalText); } catch (e) { console.error("[report relay]", e.message); }
+          }
+        }
       },
     });
   });
@@ -2541,6 +2562,85 @@ function serveMedia(res, full, req) {
   });
 }
 
+// ---------------------------------------------------------------- self-restart
+// The Director lives INSIDE this node process, so it can never `kill` us and
+// survive to confirm it. Instead /system/restart hands the job OUT to the rust
+// shell via a temp-file trigger (the same file-IPC pattern the shell already
+// uses for editor-open / world-ready). The shell runs its battle-tested
+// tray-restart path (kill listener → wait port-free → spawn fresh → reload
+// overlay → keep the Child handle). If no shell consumes the trigger in time
+// (daemon launched standalone), we fall back to re-execing ourselves.
+const TMP = require("os").tmpdir();
+const RESTART_TRIGGER = path.join(TMP, "bagidea_daemon_restart_request");
+const RESTART_NOTICE = path.join(TMP, "bagidea_daemon_restart_notice");
+const STARTED_AT = Date.now();
+// buildId is derived from server.js's on-disk mtime — it CHANGES the moment the
+// file is edited, so a before/after /system/version proves new code is loaded.
+function buildInfo() {
+  let mtimeMs = 0;
+  try { mtimeMs = fs.statSync(__filename).mtimeMs; } catch {}
+  return {
+    pid: process.pid,
+    startedAt: STARTED_AT,
+    mtime: Math.floor(mtimeMs),
+    buildId: "b" + Math.floor(mtimeMs).toString(36),
+  };
+}
+let lastRestartReq = 0;          // debounce: never loop-restart
+let reexeced = false;            // fallback re-exec fires at most once
+function spawnReplacement() {
+  if (reexeced) return;
+  reexeced = true;
+  // Pipe the child's output to daemon.log — a detached child must NOT inherit a
+  // console that's about to vanish (it can crash on first write), the same
+  // reason the shell redirects in spawn_daemon_force.
+  let out = "ignore";
+  try { out = fs.openSync(path.join(__dirname, "daemon.log"), "a"); } catch {}
+  try {
+    const child = spawn(process.execPath, [__filename], {
+      detached: true, stdio: ["ignore", out, out], env: process.env,
+    });
+    child.unref();
+  } catch (e) { console.error("[restart] re-exec spawn failed:", e.message); }
+  process.exit(0);
+}
+function selfReexec() {
+  try { fs.unlinkSync(RESTART_TRIGGER); } catch {}
+  // Drop our listener so the replacement can bind :8787, then spawn + exit.
+  // Guard with a hard timer in case close() hangs on a keep-alive socket.
+  try { server.close(() => spawnReplacement()); } catch { spawnReplacement(); }
+  setTimeout(spawnReplacement, 2000);
+}
+// Trigger a restart through the shell, with a self-re-exec fallback. Returns a
+// short status string for the HTTP response.
+function requestRestart() {
+  const now = Date.now();
+  if (now - lastRestartReq < 8000) return { ok: false, status: "debounced" };
+  lastRestartReq = now;
+  // 1) tell the owner something is happening BEFORE we go down (the in-flight
+  //    turn that asked for this will die with us; this line is its receipt).
+  try { channels.relay("♻️ กำลังรีสตาร์ทสมองออฟฟิศ… เดี๋ยวกลับมาพร้อมโค้ดใหม่"); } catch {}
+  try { broadcast({ type: "chat.message", agent: "main",
+    text: "♻️ กำลังรีสตาร์ทสมองออฟฟิศ…" }); } catch {}
+  // 2) persist sessions so the conversation history survives the swap.
+  try { saveSess(); } catch (e) { console.error("[restart] saveSess:", e.message); }
+  // 3) leave a notice the NEXT process reads on boot to confirm it came up.
+  try { fs.writeFileSync(RESTART_NOTICE, String(now)); } catch {}
+  // 4) drop the trigger the shell watches; it deletes the file when it consumes
+  //    it, which is exactly how we detect "a shell handled it".
+  try { fs.writeFileSync(RESTART_TRIGGER, String(now)); } catch (e) {
+    console.error("[restart] trigger write:", e.message);
+  }
+  // 5) fallback: if the trigger is still sitting there after a grace window, no
+  //    shell picked it up → re-exec ourselves.
+  setTimeout(() => {
+    let handled = false;
+    try { handled = !fs.existsSync(RESTART_TRIGGER); } catch {}
+    if (!handled) { console.log("[restart] no shell — self re-exec"); selfReexec(); }
+  }, 4000);
+  return { ok: true, status: "triggered" };
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && (req.url.split("?")[0] === "/" || req.url.split("?")[0] === "/index.html")) {
     res.writeHead(200, {
@@ -2686,6 +2786,17 @@ const server = http.createServer((req, res) => {
         res.end(String(e.message));
       }
     });
+
+  } else if (req.method === "GET" && req.url.split("?")[0] === "/system/version") {
+    // Proof-of-restart probe: pid + startedAt change on a fresh process, and
+    // buildId tracks server.js's mtime — so new code is provably loaded.
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(buildInfo()));
+
+  } else if (req.method === "POST" && req.url.split("?")[0] === "/system/restart") {
+    const r = requestRestart();
+    res.writeHead(r.ok ? 200 : 429, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ...r, build: buildInfo() }));
 
   } else if (req.method === "GET" && req.url.startsWith("/sessions/log")) {
     // Per-thread chat history for the overlay.
@@ -4386,15 +4497,39 @@ server.on("upgrade", (req, sock) => {
 process.on("uncaughtException", (e) => console.error("[fatal] uncaught:", e && e.stack || e));
 process.on("unhandledRejection", (e) => console.error("[fatal] rejection:", e && e.stack || e));
 
+const OEP_PORT = process.env.OEP_PORT || 8787;  // override only for isolated tests
+let listenAttempts = 0;
+function tryListen() { server.listen(OEP_PORT, "127.0.0.1"); }
+
 server.on("error", (e) => {
-  // Most likely EADDRINUSE — another daemon already holds :8787. Exit cleanly
-  // (code 1) so the launcher/watchdog knows not to expect us, instead of a
-  // cryptic unhandled-error crash.
+  // EADDRINUSE during a restart: the predecessor is still letting go of the
+  // port. Retry a few times before giving up — covers both the self re-exec
+  // fallback and the shell's spawn racing the old listener. Exhaust the
+  // retries → exit cleanly (code 1) so the watchdog knows not to expect us.
+  if (e && e.code === "EADDRINUSE" && listenAttempts < 20) {
+    listenAttempts++;
+    setTimeout(tryListen, 300);
+    return;
+  }
   console.error("[fatal] server error:", e && e.message || e);
   process.exit(1);
 });
 
-const OEP_PORT = process.env.OEP_PORT || 8787;  // override only for isolated tests
-server.listen(OEP_PORT, "127.0.0.1", () =>
-  console.log(`[oep] http+ws listening :${OEP_PORT}`)
-);
+server.on("listening", () => {
+  console.log(`[oep] http+ws listening :${OEP_PORT}`);
+  // If a restart notice is waiting, this process IS the fresh one — confirm to
+  // the owner once the channels have had a moment to reconnect.
+  let restarted = false;
+  try { restarted = fs.existsSync(RESTART_NOTICE); } catch {}
+  if (restarted) {
+    try { fs.unlinkSync(RESTART_NOTICE); } catch {}
+    setTimeout(() => {
+      const b = buildInfo();
+      try { channels.relay(`✅ รีสตาร์ทเสร็จ — build ${b.buildId} active`); } catch {}
+      try { broadcast({ type: "chat.message", agent: "main",
+        text: `✅ รีสตาร์ทเสร็จ — build ${b.buildId} active` }); } catch {}
+    }, 5000);
+  }
+});
+
+tryListen();

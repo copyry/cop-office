@@ -21,6 +21,10 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 // Held true during a deliberate tray "Restart daemon": we kill the daemon and
 // respawn it ourselves, so the watchdog must NOT race in its own replacement.
 static RESTARTING: AtomicBool = AtomicBool::new(false);
+// Set by the daemon watchdog (a background thread that can't touch the main
+// thread's daemon_child handle) to ask the event loop to respawn a crashed
+// daemon — so the MAIN thread owns the new Child and can reap it on exit.
+static RESPAWN_REQUEST: AtomicBool = AtomicBool::new(false);
 
 use tao::{
     dpi::{LogicalPosition, LogicalSize},
@@ -176,8 +180,15 @@ fn daemon_running() -> bool {
 fn kill_daemon_listeners() {
     #[cfg(not(target_os = "windows"))]
     {
-        // lsof lists the PIDs holding tcp:8787; SIGKILL each.
-        if let Ok(out) = Command::new("lsof").args(["-ti", "tcp:8787"]).output() {
+        // ONLY the process LISTENING on 8787 — i.e. the daemon itself. A bare
+        // `lsof -ti tcp:8787` also returns every CLIENT with an open connection
+        // (the Godot office, the overlay webview's networking helper), so the
+        // old form SIGKILLed the whole office on every "Restart daemon". The
+        // `-sTCP:LISTEN` state filter narrows it to the listener.
+        if let Ok(out) = Command::new("lsof")
+            .args(["-nP", "-iTCP:8787", "-sTCP:LISTEN", "-t"])
+            .output()
+        {
             for line in String::from_utf8_lossy(&out.stdout).lines() {
                 let pid = line.trim();
                 if !pid.is_empty() {
@@ -246,6 +257,30 @@ fn spawn_daemon_force(root: &PathBuf) -> Option<Child> {
         Err(_) => { c.stdout(Stdio::null()).stderr(Stdio::null()); }
     }
     hidden(&mut c).spawn().ok()
+}
+
+// The one true restart sequence, shared by the tray "Restart daemon" item and
+// the daemon's own POST /system/restart (delivered via a temp-file trigger).
+// Kill the old daemon (the Child we hold AND any listener we don't), wait for
+// the port to free so the respawn can't hit EADDRINUSE, then bring a fresh one
+// up — kept in daemon_child so quitting still reaps it. RESTARTING holds the
+// watchdog off so it can't race in its own replacement.
+fn do_restart(daemon_child: &mut Option<Child>, root: &PathBuf) {
+    RESTARTING.store(true, Ordering::Relaxed);
+    if let Some(c) = daemon_child.as_mut() {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+    *daemon_child = None;
+    kill_daemon_listeners();
+    for _ in 0..20 {
+        if !daemon_running() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    *daemon_child = spawn_daemon_force(root);
+    RESTARTING.store(false, Ordering::Relaxed);
 }
 
 fn spawn_office(root: &PathBuf, cx: i32, cy: i32) -> Option<Child> {
@@ -1421,7 +1456,6 @@ fn main() {
     // every 5s, and spawn_daemon is a no-op while it's already up. Stops the
     // moment the user quits so we don't fight a deliberate shutdown.
     {
-        let root = root.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(5));
             if SHUTTING_DOWN.load(Ordering::Relaxed) {
@@ -1429,7 +1463,10 @@ fn main() {
             }
             if !daemon_running() && !SHUTTING_DOWN.load(Ordering::Relaxed)
                 && !RESTARTING.load(Ordering::Relaxed) {
-                let _ = spawn_daemon(&root);
+                // Don't spawn from this thread — it can't own daemon_child (the
+                // handle lives in the event loop). Ask the main loop to respawn
+                // so the new Child is tracked and reaped on exit.
+                RESPAWN_REQUEST.store(true, Ordering::Relaxed);
             }
         });
     }
@@ -1589,6 +1626,25 @@ fn main() {
             // manual tray "Hide office" toggle throttles.
         }
 
+        // ---- daemon self-restart trigger: the daemon's POST /system/restart
+        // drops this temp file (it can't kill its own host and live to confirm).
+        // We run the SAME proven sequence as the tray item and reload the overlay.
+        if std::env::temp_dir().join("bagidea_daemon_restart_request").exists() {
+            let _ = std::fs::remove_file(
+                std::env::temp_dir().join("bagidea_daemon_restart_request"));
+            do_restart(&mut daemon_child, &root);
+            reload_overlay_at = Some(std::time::Instant::now()
+                + std::time::Duration::from_millis(1200));
+        }
+        // ---- crash respawn: the watchdog thread flags this; the MAIN thread
+        // does the spawn so the new Child handle is owned here (reaped on exit).
+        if RESPAWN_REQUEST.swap(false, Ordering::Relaxed)
+            && !daemon_running() && !RESTARTING.load(Ordering::Relaxed) {
+            if let Some(c) = spawn_daemon_force(&root) {
+                daemon_child = Some(c);
+            }
+        }
+
         let mut shutdown = false;
         let mut toggle = false;
 
@@ -1612,26 +1668,7 @@ fn main() {
             } else if ev.id == autostart_id {
                 platform::set_autostart(autostart_item.is_checked());
             } else if ev.id == restart_id {
-                // Kill the daemon and bring a fresh one up in its place, kept in
-                // daemon_child so quitting still reaps it. RESTARTING holds the
-                // watchdog off so it can't race in its own replacement; the
-                // brief port-free wait keeps the respawn from hitting EADDRINUSE.
-                RESTARTING.store(true, Ordering::Relaxed);
-                if let Some(c) = daemon_child.as_mut() {
-                    let _ = c.kill();
-                    let _ = c.wait();
-                }
-                daemon_child = None;
-                // Also take down a daemon the shell didn't spawn (manual `node
-                // server.js`, or a leftover) — otherwise it keeps the port and
-                // the respawn below silently hits EADDRINUSE and dies.
-                kill_daemon_listeners();
-                for _ in 0..20 {
-                    if !daemon_running() { break; }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-                daemon_child = spawn_daemon_force(&root);
-                RESTARTING.store(false, Ordering::Relaxed);
+                do_restart(&mut daemon_child, &root);
                 // Give it ~1.2s to bind, then reload the overlay (non-blocking).
                 reload_overlay_at = Some(std::time::Instant::now()
                     + std::time::Duration::from_millis(1200));
