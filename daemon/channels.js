@@ -162,9 +162,27 @@ function wsConnect(host, path, hooks) {
 // same line as other text (or onto the previous marker), so each item lands on
 // its own line in Telegram/Discord/LINE too.
 function breakInlineLists(text) {
-  return String(text)
-    .replace(/(\((?:\d+|[a-zA-Z])\))(?=\((?:\d+|[a-zA-Z])\))/g, "$1\n")
-    .replace(/(\S)[ \t]+(\((?:\d+|[a-zA-Z])\)(?=\s|$))/g, "$1\n$2");
+  const s = String(text);
+  // Only break a marker that belongs to an ascending RUN (≥2 markers): a lone
+  // "(1)" / "(a)" in prose — e.g. "ข้อ (1) ของสัญญา" — is a reference, not a
+  // list item, so it must stay inline.
+  const present = new Set();
+  for (const m of s.matchAll(/\((\d+|[a-zA-Z])\)/g)) present.add(m[1]);
+  const seq = (tok) => {
+    if (/^\d+$/.test(tok)) {
+      const n = +tok;
+      return present.has(String(n - 1)) || present.has(String(n + 1));
+    }
+    const c = tok.charCodeAt(0);
+    return present.has(String.fromCharCode(c - 1)) || present.has(String.fromCharCode(c + 1));
+  };
+  return s
+    // back-to-back markers in a run: (a)(b)(c) → one per line
+    .replace(/(\((\d+|[a-zA-Z])\))(?=\((?:\d+|[a-zA-Z])\))/g,
+      (mm, full, tok) => (seq(tok) ? full + "\n" : mm))
+    // a run marker glued after other text on the same line
+    .replace(/(\S)[ \t]+(\((\d+|[a-zA-Z])\)(?=\s|$))/g,
+      (mm, pre, marker, tok) => (seq(tok) ? pre + "\n" + marker : mm));
 }
 
 // ---- connectors --------------------------------------------------------------
