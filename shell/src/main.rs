@@ -1542,6 +1542,16 @@ fn main() {
                             .build(target)
                             .expect("popup window");
                         let id = win.id();
+                        // Center on the primary monitor — otherwise the OS scatters
+                        // popups to inconsistent spots each time.
+                        if let Some(m) = win.primary_monitor() {
+                            let ms = m.size();
+                            let mp = m.position();
+                            let ws = win.outer_size();
+                            let cx = mp.x + ((ms.width as i32 - ws.width as i32) / 2).max(0);
+                            let cy = mp.y + ((ms.height as i32 - ws.height as i32) / 2).max(0);
+                            win.set_outer_position(tao::dpi::PhysicalPosition::new(cx, cy));
+                        }
                         let pproxy = proxy.clone();
                         match platform::webview_extras(
                             WebViewBuilder::new()

@@ -61,10 +61,13 @@
   .port:hover { background:var(--accent); }
   .port.in { top:-8px; } .port.out { bottom:-8px; }
   #side { width:320px; border-left:1px solid var(--line); background:#0c1322; padding:12px;
-    overflow:auto; display:flex; flex-direction:column; gap:8px; }
+    overflow:hidden; display:flex; flex-direction:column; gap:8px; }
+  #side h3, #side .muted, #robadge, .acts { flex:none; }
   #side h3 { margin:0 0 2px; font-size:13px; }
-  #plan { white-space:pre-wrap; font-size:12.5px; color:#d6e2f0; background:#0a1020;
-    border:1px solid var(--line); border-radius:10px; padding:11px; min-height:80px; }
+  /* the plan/result takes the leftover height and scrolls inside itself, so long
+     output never pushes the Run/Skill buttons off the panel */
+  #plan { white-space:pre-wrap; word-break:break-word; font-size:12.5px; color:#d6e2f0; background:#0a1020;
+    border:1px solid var(--line); border-radius:10px; padding:11px; flex:1; min-height:80px; overflow:auto; }
   #side .muted { color:var(--dim); font-size:11px; }
   .acts { display:flex; gap:8px; margin-top:4px; } .acts button { flex:1; }
   #robadge { font-size:11px; color:#ffcf8a; background:rgba(255,180,90,.1);

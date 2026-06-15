@@ -3574,10 +3574,13 @@ const server = http.createServer((req, res) => {
       const w = JSON.parse(body || "{}");
       queueDirectorTurn((release) => {
         ceoFlow(
-          "Execute this workflow now. Do each step; a node with several outgoing " +
-          "arrows runs those branches in parallel; a node with several incoming " +
-          "arrows waits for all of them first. Delegate where it makes sense, then " +
-          "report the result.\n\n" + workflowToText(w),
+          "Execute this workflow now. Do each step in order. When a node has SEVERAL " +
+          "OUTGOING arrows, those branches run in PARALLEL — and you must REALLY run " +
+          "them in parallel by ending your reply with one `SUB: <branch task>` line per " +
+          "branch (they become real ghost clones the owner can watch split off). Do NOT " +
+          "just say you split — emit the SUB: lines. A node with several incoming arrows " +
+          "waits for all branches, then continues from their merged results. Report the " +
+          "final result.\n\n" + workflowToText(w),
           undefined, undefined,
           { logPrompt: "🔀▶ รัน workflow: " + (w.name || ""),
             onDone: (out, ok) => {
@@ -3600,9 +3603,11 @@ const server = http.createServer((req, res) => {
         description: ("Run the saved workflow: " + nm).slice(0, 200),
         content: ("When asked to run \"" + nm + "\", follow this workflow exactly:\n\n" +
           workflowToText(w) +
-          "\nDo the steps in order; run parallel branches concurrently (e.g. split into " +
-          "ghost sub-agents), and at a merge wait for every incoming branch before " +
-          "continuing. Report the final result clearly.").slice(0, 4000),
+          "\nDo the steps in order. For a node with several OUTGOING arrows, REALLY run " +
+          "the branches in parallel by ending the reply with one `SUB: <branch task>` line " +
+          "per branch (they become real ghost clones) — don't just describe splitting. At " +
+          "a node with several incoming arrows, wait for all branches then continue from " +
+          "their merged results. Report the final result clearly.").slice(0, 4000),
       };
       saveReg();
       try { if (retrievalOk) { retrieval.reindexSkill(id, reg.skills[id]); retrieval.persist(); } } catch {}

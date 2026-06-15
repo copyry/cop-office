@@ -4,6 +4,21 @@ All notable changes to BagIdea Office. A **release** is a deliberate `VERSION`
 bump on `main` (see [RELEASING.md](RELEASING.md)) — that's what triggers the
 in-app 🔄 update banner. Versions follow [semver](https://semver.org).
 
+## [0.7.11] — Workflow polish, centered windows, real ghost-splits & a fuller Tools Hub
+
+**Fixed**
+- **Workflow side panel no longer overflows.** Long analysis/run output now scrolls
+  inside its box, so the Run / Save-as-Skill buttons stay put.
+- **Workflows really split into ghosts.** When a flow has parallel branches, the
+  team now actually spawns visible ghost clones (via the SUB protocol) instead of
+  only *saying* it split.
+
+**Changed**
+- **Pop-out windows open centered** on screen (plugins, Workflow Builder, Tools
+  Hub) instead of scattering to inconsistent spots.
+- **Tools Hub is fuller** — 15 ready MCP servers plus an **“Add your own MCP”**
+  box so you can install any server by pasting its command.
+
 ## [0.7.10] — Fix the Plugins “open” button
 
 **Fixed**
