@@ -29,6 +29,7 @@ const {
 const maintenance = require("./maintenance");
 const retrieval = require("./retrieval");
 const skillsSync = require("./skills");
+const providers = require("./providers");   // LLM provider catalog/config (phase 1: config only)
 
 const WORKSPACE = path.join(__dirname, "..", "workspace");
 // Server-local paths (the refactor moved REPLAY_COUNT to constants.js but these
@@ -81,6 +82,10 @@ function loadReg() {
   reg.tools = Object.keys(BUILTIN_TOOLS);
   reg.mcpServers = reg.mcpServers || {};
   reg.places = reg.places || {};  // shorthand locations: "ห้องสมุด" → folder
+  // LLM provider selection (phase 1: stored + served, NOT yet used to route any
+  // agent run — Claude Code stays the executor). Normalized so a stale/hand-
+  // edited registry always lands on valid defaults.
+  reg.providers = providers.normalizeConfig(reg.providers);
   // Default main agent: SHINO — the owner's (CEO's) second-in-command who runs
   // the floor. A manager, not an individual contributor: few hands-on tools,
   // delegation as his craft. Playful but serious about the work.
@@ -2914,6 +2919,53 @@ const server = http.createServer((req, res) => {
   } else if (req.method === "GET" && req.url === "/registry") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(reg));
+
+  } else if (req.method === "GET" && req.url.split("?")[0] === "/providers") {
+    // LLM provider catalog + the owner's current selection + per-provider
+    // readiness (key present?). Phase 1: descriptive only — no run is routed by
+    // this. Carries booleans for availability, never the key values.
+    reg.providers = providers.normalizeConfig(reg.providers);
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({
+      catalog: providers.catalog(),
+      config: reg.providers,
+      active: providers.resolveActive(reg.providers),
+      availability: providers.availability(reg.apiKeys, process.env),
+    }));
+
+  } else if (req.method === "POST" && req.url.split("?")[0] === "/providers") {
+    // Set the active provider and/or a provider's chosen model. Validated, then
+    // persisted to registry.json. This ONLY records the choice — it does not
+    // change how agents execute (Claude Code remains the runtime in phase 1).
+    readBody(req, (body) => {
+      try {
+        const { active, provider, model } = JSON.parse(body || "{}");
+        const cfg = providers.normalizeConfig(reg.providers);
+        // Which provider does `model` apply to? explicit `provider`, else the
+        // one being activated, else the currently active one.
+        const target = provider || active || cfg.active;
+        if (active !== undefined) {
+          const v = providers.validate(active);
+          if (!v.ok) throw new Error(v.error);
+          cfg.active = active;
+        }
+        if (model !== undefined) {
+          const v = providers.validate(target, model);
+          if (!v.ok) throw new Error(v.error);
+          cfg.models[target] = model;
+        }
+        reg.providers = providers.normalizeConfig(cfg);
+        saveReg();
+        broadcast({ type: "providers.changed", agent: "main",
+          active: reg.providers.active }, false);
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, config: reg.providers,
+          active: providers.resolveActive(reg.providers) }));
+      } catch (e) {
+        res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+      }
+    });
 
   } else if (req.method === "GET" && req.url.startsWith("/recall")) {
     // Relevance search over the office's memory / projects / owner facts /
