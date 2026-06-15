@@ -1,15 +1,18 @@
-# Migration note — Windowed mode (`BAGIDEA_WINDOW=1`)
+# Migration note — Windowed mode (now the macOS default)
 
-> Hand-off note for whoever ports this feature into the other project copy.
-> Goal: run the Godot world as a **normal framed, movable window** (3/4 of the
-> screen, centred) while still keeping the shell's floating **chat head + tray** — instead
-> of the borderless desktop-embed wallpaper. Opt-in via env var; original
-> behaviour and the Windows path stay 100% unchanged.
+> Run the Godot world as a **normal framed, movable window** (3/4 of the screen,
+> centred) while still keeping the shell's floating **chat head + tray** — instead
+> of the borderless desktop-embed wallpaper.
+>
+> **Update:** windowed mode is now the **DEFAULT on macOS**. The legacy desktop
+> wallpaper embed is the opt-in, via **`BAGIDEA_WINDOW=0`**. The Windows path
+> stays 100% unchanged.
 
 ## Trigger / contract
 
-- New env var: **`BAGIDEA_WINDOW=1`** (read by the **shell**, macOS only).
-- When set, the shell passes the Godot user arg **`--windowed`** instead of
+- Env var: **`BAGIDEA_WINDOW=0`** (read by the **shell**, macOS only) selects the
+  legacy wallpaper embed; anything else (unset / `1`) gives the windowed default.
+- In windowed mode the shell passes the Godot user arg **`--windowed`** instead of
   `--wallpaper`, and **skips the DYLD wallpaper shim** entirely.
 - Godot branches on `--windowed` for window placement, but shares the perf rung
   and the `bagidea_world_ready` flag with `--wallpaper`.
@@ -18,18 +21,18 @@
 
 ### 1. `shell/src/main.rs` — `platform::office_args()` (macOS `#[cfg(target_os = "macos")]`)
 
-Added an early opt-in branch at the top of the function:
+Windowed is the default; the wallpaper embed is gated behind `BAGIDEA_WINDOW=0`:
 
 ```rust
-if std::env::var("BAGIDEA_WINDOW").as_deref() == Ok("1") {
+if std::env::var("BAGIDEA_WINDOW").as_deref() != Ok("0") {
     c.args(["--path"]).arg(root.join("godot")).args(["--", "--windowed"]);
     // No DYLD shim: no desktop-level attach in window mode.
     return;
 }
-// ...original --wallpaper + DYLD_INSERT_LIBRARIES shim path unchanged below...
+// ...legacy --wallpaper + DYLD_INSERT_LIBRARIES shim path (opt-in) below...
 ```
 
-- Original path (no env / env != "1") is byte-for-byte the old behaviour.
+- The wallpaper path (`BAGIDEA_WINDOW=0`) is byte-for-byte the old behaviour.
 - Windows `office_args` was **not touched** (WorkerW path unchanged).
 
 ### 2. `godot/scripts/office_floor.gd`
@@ -84,11 +87,12 @@ elif "--windowed" in args:
 
 ```sh
 cd shell && cargo build --release
-BAGIDEA_WINDOW=1 ./shell/target/release/bagidea-office-shell
+./shell/target/release/bagidea-office-shell            # windowed (default)
+BAGIDEA_WINDOW=0 ./shell/target/release/bagidea-office-shell   # legacy wallpaper embed
 ```
 
 Expect: Godot opens as a bordered window at 3/4 of the screen, centred, plus the
-floating chat head and the tray icon. Running without `BAGIDEA_WINDOW` gives the
+floating chat head and the tray icon. Setting `BAGIDEA_WINDOW=0` gives the
 original borderless desktop wallpaper.
 
 ---

@@ -699,7 +699,9 @@ function createProject(name, place, pathArg) {
   let dir = String(pathArg || "").trim();
   if (!dir && place && reg.places[place]) dir = path.join(reg.places[place], name);
   if (!dir) throw new Error("need place or path");
-  dir = dir.replace(/\//g, "\\");
+  // Windows stores paths with backslashes; macOS/Linux keep forward slashes
+  // (forcing "\" there mangles "/Users/…" into a junk folder under the cwd).
+  if (process.platform === "win32") dir = dir.replace(/\//g, "\\");
   // Separator-proof normalization for every duplicate check.
   const norm = (s) => String(s).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
   if (projects.some((x) => norm(x.dir) === norm(dir)))
@@ -1294,12 +1296,14 @@ function ceoFlow(prompt, session, project, opts = {}) {
     `Prose alone dispatches NOTHING — only DELEGATE lines do). ` +
     `Anything not delegated you handle yourself. Reply to the owner with a short ` +
     `plan in the language they used.` + directorNote();
+  originRetain(opts.origin);   // the Director himself may gen an image this turn
   return runClaude("main", wrapped, {
     session,
     project,
     logPrompt: opts.logPrompt || ("👑 (CEO) " + prompt),
-    filterText: makeDelegateFilter(0, session),
+    filterText: makeDelegateFilter(0, session, undefined, opts.origin),
     onDone: (out, ok) => {
+      originRelease(opts.origin);
       if (opts.relay && ok && out) try { channels.relay("👑 " + out); } catch {}
       if (opts.onDone) opts.onDone(out, ok);   // channels/CLI hook the reply ride-back here
     },
@@ -1325,9 +1329,52 @@ function pumpDirector() {
   dirQueue.shift()(() => { dirBusy = false; pumpDirector(); });
 }
 
+// ---- channel progress relay (#feature 2) ---------------------------------
+// While a CHANNEL-origin Director turn works, terse status lines ride back to
+// the SAME chat — extra texture ON TOP of the final reply, never a replacement.
+// The `origin` is threaded EXPLICITLY through ceoFlow → delegate dispatch →
+// report-backs, so overlay/CLI turns (which never create one) can't leak
+// progress into a channel, and two channel turns never cross wires. Lines are
+// coalesced: at most one push per ~3s, batched into a single message.
+function makeProgressOrigin(reply, replyPhoto, channel) {
+  return { reply, replyPhoto, channel, pending: [], timer: null, lastFlush: 0, refs: 0 };
+}
+// Live channel origins — refcounted so an origin stays "active" while ANY of its
+// agents (the Director turn AND every delegate it spawned) is still running. A
+// generated image is relayed to whatever is live now; overlay/CLI turns never
+// create an origin, so their images never reach a channel (#feature 4).
+const liveOrigins = new Set();
+function originRetain(o) { if (o) { o.refs = (o.refs || 0) + 1; liveOrigins.add(o); } }
+function originRelease(o) { if (o) { o.refs = (o.refs || 0) - 1; if (o.refs <= 0) liveOrigins.delete(o); } }
+// Push a freshly-generated image file back to every live channel origin. Each
+// failure degrades to a one-line text note — a flaky upload never sinks the run.
+function relayImageToChannels(filePath) {
+  for (const o of liveOrigins) {
+    const fallback = () => { try { o.reply("(สร้างรูปแล้ว ดูในออฟฟิศ)"); } catch {} };
+    if (typeof o.replyPhoto !== "function") { fallback(); continue; }
+    try {
+      o.replyPhoto(filePath, "", (err) => { if (err) fallback(); });
+    } catch { fallback(); }
+  }
+}
+function relayProgress(origin, line) {
+  if (!origin || origin.noProgress || !line) return;
+  origin.pending.push(line);
+  if (origin.timer) return;                       // a flush is already queued
+  const wait = Math.max(0, 3000 - (Date.now() - origin.lastFlush));
+  origin.timer = setTimeout(() => {
+    origin.timer = null;
+    origin.lastFlush = Date.now();
+    const msg = origin.pending.join("\n");
+    origin.pending = [];
+    if (msg) try { origin.reply(msg); } catch (e) { console.error("[progress]", e.message); }
+  }, wait);
+}
+const agentName = (id) => (reg.agents[id] || { name: id }).name;
+
 // DELEGATE:-line parser shared by the CEO order and every report-back turn.
 // onHit fires per dispatched assignment ("did he hand off more work?").
-function makeDelegateFilter(depth, session, onHit) {
+function makeDelegateFilter(depth, session, onHit, origin) {
   return (text) => {
     const keep = [];
     for (const ln of String(text).split("\n")) {
@@ -1362,6 +1409,7 @@ function makeDelegateFilter(depth, session, onHit) {
       }
       if (tgt && tgt !== "ceo" && tgt !== "main") {
         broadcast({ type: "task.delegated", agent: "main", target: tgt });
+        relayProgress(origin, `🛠 ส่งให้ ${agentName(tgt)} แล้ว…`);
         if (onHit) onHit();
         const inst = m[3];
         const t = tgt;
@@ -1381,16 +1429,23 @@ function makeDelegateFilter(depth, session, onHit) {
           // agent must NOT enter it — report back so the Director re-plans
           // (and the two never collide inside one working tree).
           if (proj && projWin[proj]) {
+            relayProgress(origin, `⚠️ ${agentName(t)} ติดปัญหา`);
             reportToMain(t, `โปรเจค "${projName || proj}" เจ้าของกำลังเปิดทำงานอยู่ — ` +
-              `เข้าไปทำตอนนี้ไม่ได้ รอจนเจ้าของปิดหน้าต่างก่อน`, false, depth, session);
+              `เข้าไปทำตอนนี้ไม่ได้ รอจนเจ้าของปิดหน้าต่างก่อน`, false, depth, session, origin);
             return;
           }
           const tl = sess[t] || [];
           const te = tl.length ? tl.reduce((a, b) => (a.ts > b.ts ? a : b)) : null;
+          originRetain(origin);   // a delegate's image relays to the source chat
           runClaude(t, inst, {
             project: proj,
             session: proj && (!te || te.proj !== proj) ? "new" : undefined,
-            onDone: (out, ok) => reportToMain(t, out, ok, depth, session),
+            onDone: (out, ok) => {
+              originRelease(origin);
+              relayProgress(origin, ok ? `✅ ${agentName(t)} เสร็จแล้ว`
+                : `⚠️ ${agentName(t)} ติดปัญหา`);
+              reportToMain(t, out, ok, depth, session, origin);
+            },
           });
         }, 4500);
       } else keep.push(ln);
@@ -1399,7 +1454,7 @@ function makeDelegateFilter(depth, session, onHit) {
   };
 }
 
-function reportToMain(fromId, text, ok, depth, session) {
+function reportToMain(fromId, text, ok, depth, session, origin) {
   const a = reg.agents[fromId] || { name: fromId };
   const wrapped =
     `Report back from your team member ${a.name} (${fromId})` +
@@ -1415,14 +1470,16 @@ function reportToMain(fromId, text, ok, depth, session) {
         `the language of the original order. Do not delegate further.`);
   queueDirectorTurn((release) => {
     let delegatedMore = false;
+    originRetain(origin);   // the report-back turn may itself gen an image
     runClaude("main", wrapped, {
       session,
       noSub: true,
       logPrompt: `📨 รายงานผลจาก ${a.name}`,
       filterText: depth < 2
-        ? makeDelegateFilter(depth + 1, session, () => { delegatedMore = true; })
+        ? makeDelegateFilter(depth + 1, session, () => { delegatedMore = true; }, origin)
         : undefined,
       onDone: (_finalText, fOk) => {
+        originRelease(origin);
         release();
         // No further hand-offs → that WAS the summary: walk it to the boss.
         if (!delegatedMore && fOk)
@@ -1961,11 +2018,48 @@ function setAutostart(on, cb) {
 // The outside world (Telegram / Discord / LINE) talks to the Director —
 // inbound messages become serialized Director turns (no thread races) and
 // his reply rides back on the same channel. Full DELEGATE power applies.
+
+// Resolve "name or id" → an agent id, case-insensitive on BOTH id and display
+// name. Returns the id or null. Used by /ask to target one teammate directly.
+function resolveAgentKey(key) {
+  key = String(key || "").trim();
+  if (!key) return null;
+  if (reg.agents[key]) return key;
+  const low = key.toLowerCase();
+  return Object.keys(reg.agents).find((id) =>
+    id.toLowerCase() === low ||
+    (reg.agents[id].name || "").toLowerCase() === low) || null;
+}
+// Parse "/ask <agent> <message>" — the agent may be an id OR a (possibly
+// multi-word) name, matched longest-first so "Nong Mali" beats "Nong". Returns
+// { agentId, prompt } on success, or { error } (unknown agent / empty message).
+function parseChannelAsk(text) {
+  const rest = text.replace(/^\/ask\b\s*/i, "").trim();
+  const team = () => Object.keys(reg.agents).filter((id) => id !== "ceo")
+    .map((id) => reg.agents[id].name).join(", ") || "(ยังไม่มีพนักงาน)";
+  if (!rest) return { error: `ใช้: /ask <ชื่อ agent> <ข้อความ>\nทีมที่มี: ${team()}` };
+  const toks = rest.split(/\s+/);
+  for (let k = Math.min(toks.length, 5); k >= 1; k--) {
+    const id = resolveAgentKey(toks.slice(0, k).join(" "));
+    if (id && id !== "ceo") {
+      const prompt = toks.slice(k).join(" ").trim();
+      if (!prompt) return { error: `จะถาม "${reg.agents[id].name}" ว่าอะไรครับ? — /ask ${reg.agents[id].name} <ข้อความ>` };
+      return { agentId: id, prompt };
+    }
+  }
+  return { error: `ไม่พบ agent ที่ระบุ — ทีมที่มี: ${team()}` };
+}
+
 // Slash commands from any connected chat channel (#123) — instant office info
 // without a full Director turn. Returns reply text, or null for a normal message.
 function channelCommand(text) {
   if (!text.startsWith("/")) return null;
   const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
+  // Everything after the command word, and its first token (e.g. a proposal id),
+  // with the remainder kept as a free-text note: "/approve pr123 ดีมาก".
+  const rest = text.slice(1 + cmd.length).trim();
+  const arg1 = rest.split(/\s+/)[0] || "";
+  const note = rest.slice(arg1.length).trim();
   if (cmd === "help" || cmd === "start")
     return [
       "🧭 คำสั่งลัด:",
@@ -1973,9 +2067,44 @@ function channelCommand(text) {
       "/agents — รายชื่อทีม",
       "/projects — โปรเจค",
       "/who — ใครกำลังทำงานอยู่",
+      "/proposals — ข้อเสนอที่รออนุมัติ",
+      "/proposal <id> — ดูรายละเอียดข้อเสนอ",
+      "/approve <id> [note] — อนุมัติข้อเสนอ",
+      "/reject <id> [note] — ปฏิเสธข้อเสนอ",
+      "/ask <agent> <ข้อความ> — ถาม agent นั้นตรงๆ (ไม่ผ่าน Director)",
       "",
       "พิมพ์ข้อความปกติ = สั่งงาน Director ได้เลย 👑",
     ].join("\n");
+  if (cmd === "proposals") {
+    const pend = proposals.filter((p) => p.status === "pending");
+    if (!pend.length) return "ไม่มีข้อเสนอค้างอยู่";
+    return "💡 ข้อเสนอที่รออนุมัติ:\n" +
+      pend.slice(-20).reverse()
+        .map((p) => `• ${p.id} — ${p.name} (โดย ${p.by})`).join("\n") +
+      "\n\nดูเต็ม: /proposal <id> · อนุมัติ: /approve <id> · ปฏิเสธ: /reject <id>";
+  }
+  if (cmd === "proposal") {
+    if (!arg1) return "ใช้: /proposal <id>";
+    const p = proposals.find((x) => x.id === arg1);
+    if (!p) return `ไม่พบข้อเสนอ "${arg1}" — /proposals เพื่อดูรายการ`;
+    return [
+      `💡 ${p.name}`,
+      `id: ${p.id} · สถานะ: ${p.status}`,
+      `ผู้เสนอ: ${p.by}` + (p.agents && p.agents.length ? ` (${p.agents.join(", ")})` : ""),
+      "",
+      p.detail || "(ไม่มีรายละเอียด)",
+      p.message ? `\nข้อความเจ้าของ: ${p.message}` : "",
+      "",
+      `อนุมัติ: /approve ${p.id} · ปฏิเสธ: /reject ${p.id}`,
+    ].join("\n");
+  }
+  if (cmd === "approve" || cmd === "reject") {
+    if (!arg1) return `ใช้: /${cmd} <id> [note]`;
+    const p = respondProposal(arg1, cmd, note);
+    if (!p) return `ไม่พบข้อเสนอ "${arg1}" — /proposals เพื่อดูรายการ`;
+    return (cmd === "approve" ? `✅ อนุมัติ "${p.name}" เรียบร้อย` : `❌ ปฏิเสธ "${p.name}" เรียบร้อย`) +
+      (note ? `\nโน้ตถึงทีม: ${note}` : "");
+  }
   if (cmd === "agents" || cmd === "team") {
     const list = Object.keys(reg.agents)
       .filter((id) => id !== "ceo")
@@ -2009,23 +2138,69 @@ function channelCommand(text) {
 const channels = require("./channels")({
   getConfig: () => reg.channels || {},
   log: (s) => console.log(s),
-  onMessage(channel, from, text, reply, typing) {
+  // A native Discord slash command (interaction) — MUST answer within 3s, so it
+  // only ever runs the instant command handler, never a slow Director turn.
+  onInteraction(channel, from, text, reply) {
+    broadcast({ type: "channel.message", channel, from, text: String(text).slice(0, 500) });
+    let out = null;
+    try { out = channelCommand(String(text).trim()); }
+    catch (e) { console.error("[chan interaction]", e.message); }
+    try { reply(out !== null ? out : "คำสั่งนี้ยังไม่รองรับ — /help ดูทั้งหมด"); }
+    catch (e) { console.error("[chan interaction reply]", e.message); }
+  },
+  onMessage(channel, from, text, reply, typing, replyPhoto) {
     broadcast({ type: "channel.message", channel, from,
       text: String(text).slice(0, 500) });
+    const trimmed = String(text).trim();
     // Slash command? answer instantly, no Director turn (#123).
-    const cmd = channelCommand(String(text).trim());
+    const cmd = channelCommand(trimmed);
     if (cmd !== null) { try { reply(cmd); } catch (e) { console.error("[chan cmd]", e.message); } return; }
-    // "typing…" while the Director thinks (#122) — repeated, since the platforms
-    // expire it after a few seconds.
-    let typer = null;
-    if (typeof typing === "function") {
+    // "typing…" while a turn runs (#122) — repeated, since the platforms expire
+    // it after a few seconds. (a no-op if the channel gives us no typing hook.)
+    const startTyping = () => {
+      if (typeof typing !== "function") return null;
       try { typing(); } catch {}
-      typer = setInterval(() => { try { typing(); } catch {} }, 4000);
+      return setInterval(() => { try { typing(); } catch {} }, 4000);
+    };
+    // /ask <agent> <message> — fire one teammate DIRECTLY, bypassing the
+    // Director. It runs a real Claude turn (not instant), so it rides its own
+    // queued slot + typing indicator, and answers when the agent finishes.
+    if (/^\/ask\b/i.test(trimmed)) {
+      const ask = parseChannelAsk(trimmed);
+      if (ask.error) { try { reply(ask.error); } catch (e) { console.error("[chan ask]", e.message); } return; }
+      const typer = startTyping();
+      // An origin so an image the agent gens (e.g. /ask Designer วาดโลโก้) rides
+      // back to this chat. No progress lines here (a direct ask never delegates).
+      const askOrigin = makeProgressOrigin(reply, replyPhoto, channel);
+      queueDirectorTurn((release) => {
+        originRetain(askOrigin);
+        runClaude(ask.agentId, ask.prompt, {
+          logPrompt: `📨🎯 [${channel}] → ${agentName(ask.agentId)}: ${ask.prompt.slice(0, 80)}`,
+          onDone: (out, ok) => {
+            originRelease(askOrigin);
+            release();
+            if (typer) clearInterval(typer);
+            try {
+              reply(ok && out ? `💬 ${agentName(ask.agentId)}:\n${out}`
+                : "ขออภัยครับ ระบบติดขัดชั่วคราว ลองใหม่อีกครั้งนะครับ");
+            } catch (e) { console.error("[chan ask reply]", e.message); }
+          },
+        });
+      });
+      return;
     }
+    let typer = startTyping();
     // A channel message IS the owner speaking — it goes through the CEO
     // seat: the Director walks over (ceo.summon), takes the order, may
     // DELEGATE, and his reply rides back on the same channel. Serialized
     // like every other Director turn so threads never fork.
+    // Bind THIS channel as the turn's origin: short "🛠 ส่งให้…/✅ เสร็จแล้ว"
+    // progress lines AND any generated image ride back here, on top of the final
+    // answer. Overlay/CLI turns never create one, so neither ever leaks to a
+    // channel. Progress lines opt-out via channelProgress === false; image relay
+    // stays on regardless (it's not chatty).
+    const origin = makeProgressOrigin(reply, replyPhoto, channel);
+    if (reg.channelProgress === false) origin.noProgress = true;
     queueDirectorTurn((release) => {
       ceoFlow(
         `(ข้อความนี้ส่งมาจาก ${channel.toUpperCase()} โดย "${from}" — ` +
@@ -2033,6 +2208,7 @@ const channels = require("./channels")({
         String(text).slice(0, 4000),
         undefined, undefined,
         { logPrompt: `👑📨 [${channel}] ${String(text).slice(0, 80)}`,
+          origin,
           onDone: (out, ok) => {
             release();
             if (typer) clearInterval(typer);
@@ -2171,6 +2347,59 @@ function addProposal(by, agents, name, detail) {
   proposals.push(p);
   saveProposals();
   broadcast({ type: "proposal.created", agent: by, name: p.name, proposal: p.id });
+  // Nudge every connected chat channel so the owner can approve from the phone
+  // (only fires for a real new pitch — never the rate-limited null path above).
+  const byName = (reg.agents[by] || {}).name || by;
+  try {
+    channels.relay(`💡 ข้อเสนอใหม่จาก ${byName}: ${p.name} — ` +
+      `/proposal ${p.id} เพื่อดู, /approve ${p.id} หรือ /reject ${p.id}`);
+  } catch (e) { console.error("[proposal push]", e.message); }
+  return p;
+}
+
+// Apply the owner's verdict to a pitch — the SINGLE source of truth shared by
+// the human UI (POST /proposals/respond) and the chat slash commands
+// (/approve, /reject). approve → a real project is born in the playground and
+// the Director staffs it; reject/hold are remembered. Returns the proposal on
+// success, or null when the id is unknown.
+function respondProposal(id, decision, message) {
+  const p = proposals.find((x) => x.id === id);
+  if (!p) return null;
+  p.status = decision === "approve" ? "approved"
+    : decision === "reject" ? "rejected" : "pending";
+  const note = String(message || "").slice(0, 600).trim();   // owner's optional note
+  if (note) p.message = note;
+  saveProposals();
+  const noteLine = note ? `เจ้าของฝากข้อความ: "${note}"\n` : "";
+  if (decision === "approve") {
+    let proj = null;
+    // Approved projects are born in a DEFAULT projects folder (the
+    // playground) when no location was given — agents never scaffold loose.
+    const playDir = String(reg.playground || path.join(WORKSPACE, "projects"));
+    try {
+      proj = createProject(p.name, "", path.join(playDir, p.name.replace(/[^\wก-๙ -]/g, "_")));
+    } catch (e) { /* duplicate name → Director routes to the existing one */ }
+    queueDirectorTurn((release) => {
+      runClaude("main",
+        `CEO อนุมัติข้อเสนอโปรเจคของทีมแล้ว 🎉\n` +
+        `ชื่อ: ${p.name}\nไอเดีย: ${p.detail}\nผู้เสนอ: ${p.agents.join(", ")}\n` + noteLine +
+        (proj ? `โปรเจคถูกสร้างไว้แล้วที่ ${proj.dir} (ทำงานในโฟลเดอร์นี้เท่านั้น)\n` : "") +
+        `กติกา: ห้ามแก้ไขระบบหลักของโปรแกรม (daemon/godot/shell/cli) เด็ดขาด — ` +
+        `ถ้าเป็นการต่อยอดออฟฟิศ ให้ทำเป็น plugin ตาม docs/guide/plugins.md ` +
+        `(เริ่มจาก template: github.com/bagidea/bagidea-office-template).\n` +
+        `จัดทีมเลย: DELEGATE: <agent> @ ${p.name} :: <งานชิ้นแรกที่ชัดเจน> ` +
+        `ให้คนที่เสนอไอเดียได้ทำเป็นหลัก แล้วสรุปแผนสั้นๆ` +
+        (note ? ` และนำข้อความของเจ้าของไปปรับทิศทางงานด้วย` : ""),
+        { logPrompt: `✅ อนุมัติข้อเสนอ: ${p.name}`,
+          filterText: makeDelegateFilter(0, undefined),
+          onDone: () => release() });
+    });
+  } else if (decision === "reject" && note) {
+    // The team hears WHY — the owner's note lands in the office feed.
+    broadcast({ type: "chat.message", agent: "main",
+      text: `CEO ยังไม่อนุมัติ "${p.name}" — ${note}` });
+  }
+  broadcast({ type: "proposal." + p.status, agent: p.by, name: p.name, proposal: p.id });
   return p;
 }
 
@@ -2819,12 +3048,21 @@ const server = http.createServer((req, res) => {
     {
       const q = new URL(req.url, "http://x").searchParams;
       let dir = q.get("dir") || "";
+      const win = process.platform === "win32";
       const drives = [];
-      for (let c = 65; c <= 90; c++) {
-        const d = String.fromCharCode(c) + ":\\";
-        try { if (fs.existsSync(d)) drives.push(d); } catch {}
+      if (win) {
+        for (let c = 65; c <= 90; c++) {
+          const d = String.fromCharCode(c) + ":\\";
+          try { if (fs.existsSync(d)) drives.push(d); } catch {}
+        }
+        if (!dir) dir = drives.includes("D:\\") ? "D:\\" : drives[0] || "C:\\";
+      } else {
+        // POSIX (macOS/Linux): no drive letters — start at the home folder and
+        // offer Home + filesystem root as quick jumps instead.
+        const home = require("os").homedir();
+        drives.push(home, "/");
+        if (!dir) dir = home;
       }
-      if (!dir) dir = drives.includes("D:\\") ? "D:\\" : drives[0] || "C:\\";
       let dirs = [];
       try {
         dirs = fs.readdirSync(dir, { withFileTypes: true })
@@ -2835,7 +3073,7 @@ const server = http.createServer((req, res) => {
       const parent = path.dirname(dir);
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ path: dir, parent: parent === dir ? null : parent,
-        dirs, drives }));
+        dirs, drives, sep: win ? "\\" : "/" }));
     }
 
   } else if (req.method === "POST" && req.url === "/fs/mkdir") {
@@ -3706,6 +3944,8 @@ const server = http.createServer((req, res) => {
         if (!prompt) throw new Error("no prompt");
         genImage(prompt).then((out) => {
           broadcast({ type: "image.generated", url: out.url }, false);
+          // If a channel turn is live, the image rides back to that chat too.
+          try { relayImageToChannels(out.path); } catch (e) { console.error("[img relay]", e.message); }
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify(out));
         }).catch((e) => {
@@ -3726,43 +3966,8 @@ const server = http.createServer((req, res) => {
       try {
         if (!req.headers["x-bagidea-ui"]) { res.writeHead(403); return res.end("human UI only"); }
         const { id, decision, message } = JSON.parse(body);
-        const p = proposals.find((x) => x.id === id);
+        const p = respondProposal(id, decision, message);
         if (!p) { res.writeHead(404); return res.end("unknown proposal"); }
-        p.status = decision === "approve" ? "approved"
-          : decision === "reject" ? "rejected" : "pending";
-        const note = String(message || "").slice(0, 600).trim();   // owner's optional note
-        if (note) p.message = note;
-        saveProposals();
-        const noteLine = note ? `เจ้าของฝากข้อความ: "${note}"\n` : "";
-        if (decision === "approve") {
-          let proj = null;
-          // Approved projects are born in a DEFAULT projects folder (the
-          // playground) when no location was given — agents never scaffold loose.
-          const playDir = String(reg.playground || path.join(WORKSPACE, "projects"));
-          try {
-            proj = createProject(p.name, "", path.join(playDir, p.name.replace(/[^\wก-๙ -]/g, "_")));
-          } catch (e) { /* duplicate name → Director routes to the existing one */ }
-          queueDirectorTurn((release) => {
-            runClaude("main",
-              `CEO อนุมัติข้อเสนอโปรเจคของทีมแล้ว 🎉\n` +
-              `ชื่อ: ${p.name}\nไอเดีย: ${p.detail}\nผู้เสนอ: ${p.agents.join(", ")}\n` + noteLine +
-              (proj ? `โปรเจคถูกสร้างไว้แล้วที่ ${proj.dir} (ทำงานในโฟลเดอร์นี้เท่านั้น)\n` : "") +
-              `กติกา: ห้ามแก้ไขระบบหลักของโปรแกรม (daemon/godot/shell/cli) เด็ดขาด — ` +
-              `ถ้าเป็นการต่อยอดออฟฟิศ ให้ทำเป็น plugin ตาม docs/guide/plugins.md ` +
-              `(เริ่มจาก template: github.com/bagidea/bagidea-office-template).\n` +
-              `จัดทีมเลย: DELEGATE: <agent> @ ${p.name} :: <งานชิ้นแรกที่ชัดเจน> ` +
-              `ให้คนที่เสนอไอเดียได้ทำเป็นหลัก แล้วสรุปแผนสั้นๆ` +
-              (note ? ` และนำข้อความของเจ้าของไปปรับทิศทางงานด้วย` : ""),
-              { logPrompt: `✅ อนุมัติข้อเสนอ: ${p.name}`,
-                filterText: makeDelegateFilter(0, undefined),
-                onDone: () => release() });
-          });
-        } else if (decision === "reject" && note) {
-          // The team hears WHY — the owner's note lands in the office feed.
-          broadcast({ type: "chat.message", agent: "main",
-            text: `CEO ยังไม่อนุมัติ "${p.name}" — ${note}` });
-        }
-        broadcast({ type: "proposal." + p.status, agent: p.by, name: p.name, proposal: p.id });
         res.writeHead(200); res.end("ok");
       } catch (e) { res.writeHead(400); res.end(String(e.message)); }
     });

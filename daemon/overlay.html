@@ -2839,19 +2839,26 @@
 
   // ---- 📂 in-house folder picker (Blender-style, on-theme) -----------------
   const fsPick = document.getElementById("fsPick");
-  let _fsResolve = null, _fsDir = "", _fsSel = "";
+  let _fsResolve = null, _fsDir = "", _fsSel = "", _fsSep = "/";
   async function fsLoad(dir) {
     const r = await fetch("/fs?dir=" + encodeURIComponent(dir || ""))
       .then((x) => x.json()).catch(() => ({ path: dir, dirs: [], drives: [] }));
     _fsDir = r.path;
     _fsSel = "";
+    _fsSep = r.sep || (String(r.path).includes("\\") ? "\\" : "/");
     document.getElementById("fsPath").value = r.path;
     const dv = document.getElementById("fsDrives");
     dv.innerHTML = "";
     for (const d of r.drives || []) {
       const c = document.createElement("div");
-      c.className = "chk" + (String(r.path).toUpperCase()[0] === d[0] ? " on" : "");
-      c.textContent = "💾 " + d.slice(0, 2);
+      // Windows: "C:\" drive chips. POSIX: a Home chip + filesystem root "/".
+      const isDrive = /^[A-Za-z]:[\\/]/.test(d);
+      const label = isDrive ? "💾 " + d.slice(0, 2)
+        : d === "/" ? "🗄 /"
+        : "🏠 " + (d.split(/[\\/]/).filter(Boolean).pop() || d);
+      c.className = "chk" + (String(r.path) === d ||
+        (isDrive && String(r.path).toUpperCase()[0] === d[0]) ? " on" : "");
+      c.textContent = label;
       c.onclick = () => fsLoad(d);
       dv.appendChild(c);
     }
@@ -2867,7 +2874,7 @@
         row.classList.add("sel");
         _fsSel = name;
       };
-      row.ondblclick = () => fsLoad(_fsDir.replace(/[\\/]+$/, "") + "\\" + name);
+      row.ondblclick = () => fsLoad(_fsDir.replace(/[\\/]+$/, "") + _fsSep + name);
       list.appendChild(row);
     }
     const up = document.getElementById("fsUp");
@@ -2888,7 +2895,7 @@
   document.getElementById("fsCancel").onclick = () => fsDone(null);
   document.getElementById("fsNo").onclick = () => fsDone(null);
   document.getElementById("fsOk").onclick = () =>
-    fsDone(_fsSel ? _fsDir.replace(/[\\/]+$/, "") + "\\" + _fsSel : _fsDir);
+    fsDone(_fsSel ? _fsDir.replace(/[\\/]+$/, "") + _fsSep + _fsSel : _fsDir);
   document.getElementById("fsGo").onclick = () =>
     fsLoad(document.getElementById("fsPath").value.trim());
   document.getElementById("fsPath").addEventListener("keydown", (e) => {

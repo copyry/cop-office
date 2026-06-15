@@ -10,6 +10,66 @@
 const https = require("https");
 const tls = require("tls");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
+// ---- hand-rolled multipart/form-data POST (zero-dep) ------------------------
+// jreq speaks JSON only; image/file uploads (Telegram sendPhoto, Discord
+// attachments) need multipart. fields = {name: stringValue}; files = [{name,
+// filename, contentType, buffer}]. cb(err, parsedJsonOrNull, statusCode).
+function jpostMultipart(host, pathUrl, headers, fields, files, cb, timeoutMs) {
+  const boundary = "----bagidea" + crypto.randomBytes(12).toString("hex");
+  const chunks = [];
+  for (const [k, v] of Object.entries(fields || {})) {
+    chunks.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+  }
+  for (const f of files || []) {
+    chunks.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${f.name}"; ` +
+      `filename="${f.filename}"\r\nContent-Type: ${f.contentType || "application/octet-stream"}\r\n\r\n`));
+    chunks.push(f.buffer);
+    chunks.push(Buffer.from("\r\n"));
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+  const body = Buffer.concat(chunks);
+  const req = https.request({
+    method: "POST", host, path: pathUrl,
+    headers: {
+      ...(headers || {}),
+      "content-type": "multipart/form-data; boundary=" + boundary,
+      "content-length": body.length,
+    },
+  }, (res) => {
+    let out = "";
+    res.on("data", (c) => (out += c));
+    res.on("end", () => { let j = null; try { j = JSON.parse(out); } catch {} cb(null, j, res.statusCode); });
+  });
+  req.setTimeout(timeoutMs || 65000, () => req.destroy(new Error("timeout")));
+  req.on("error", (e) => cb(e));
+  req.write(body);
+  req.end();
+}
+
+// Discord NATIVE slash commands — registered with Discord so they show up in
+// the "/" picker with autocomplete. Only INSTANT commands belong here (the ones
+// channelCommand answers without a slow Director turn) — an interaction must be
+// answered within 3s or Discord shows "application did not respond". Each maps
+// 1:1 onto the text commands channelCommand already understands, so there is no
+// duplicated logic: we just rebuild "/cmd arg note" and feed it back in.
+const SLASH_ID = { type: 3, name: "id", description: "รหัสข้อเสนอ (proposal id)", required: true };
+const SLASH_NOTE = { type: 3, name: "note", description: "ข้อความถึงทีม (ไม่บังคับ)", required: false };
+const SLASH_DEFS = [
+  { name: "status", description: "ภาพรวมออฟฟิศ" },
+  { name: "agents", description: "รายชื่อทีม" },
+  { name: "projects", description: "โปรเจค" },
+  { name: "who", description: "ใครกำลังทำงานอยู่" },
+  { name: "proposals", description: "ข้อเสนอที่รออนุมัติ" },
+  { name: "proposal", description: "ดูรายละเอียดข้อเสนอ", options: [SLASH_ID] },
+  { name: "approve", description: "อนุมัติข้อเสนอ", options: [SLASH_ID, SLASH_NOTE] },
+  { name: "reject", description: "ปฏิเสธข้อเสนอ", options: [SLASH_ID, SLASH_NOTE] },
+  { name: "help", description: "ดูคำสั่งทั้งหมด" },
+];
 
 // ---- tiny https JSON request ------------------------------------------------
 function jreq(method, host, path, headers, body, cb, timeoutMs) {
@@ -107,6 +167,7 @@ module.exports = function initChannels(ctx) {
   // pollers after a restart (two getUpdates → Telegram 409 Conflict).
   let tgGen = 0, dcGen = 0;
   let dcSock = null, dcBeat = null, dcSeq = null;
+  let dcAppId = null, dcSlashDone = false;   // app id + "registered once" guard
   let lastLine = null;  // last LINE sender {token,to} — LINE has no fixed target id
 
   const log = (s) => ctx.log && ctx.log("[chan] " + s);
@@ -140,7 +201,8 @@ module.exports = function initChannels(ctx) {
             ctx.onMessage("telegram", from, m.text,
               (reply) => sendTelegram(cfg.token, chatId, reply),
               () => jreq("POST", "api.telegram.org", `/bot${cfg.token}/sendChatAction`,
-                null, { chat_id: chatId, action: "typing" }, () => {}));
+                null, { chat_id: chatId, action: "typing" }, () => {}),
+              (file, caption, cb) => sendTelegramPhoto(cfg.token, chatId, file, caption, cb));
           }
           setTimeout(poll, 400);
         });
@@ -156,6 +218,15 @@ module.exports = function initChannels(ctx) {
         { chat_id: chatId, text: parts[i] }, () => sendNext(i + 1));
     };
     sendNext(0);
+  }
+  // Upload a local image file to the chat (multipart, no public URL needed).
+  function sendTelegramPhoto(token, chatId, filePath, caption, cb) {
+    let buf;
+    try { buf = fs.readFileSync(filePath); } catch (e) { return cb && cb(e); }
+    jpostMultipart("api.telegram.org", `/bot${token}/sendPhoto`, null,
+      { chat_id: String(chatId), ...(caption ? { caption: String(caption).slice(0, 1000) } : {}) },
+      [{ name: "photo", filename: path.basename(filePath), contentType: "image/png", buffer: buf }],
+      (e, j, st) => cb && cb(e || (j && j.ok ? null : new Error("telegram sendPhoto " + st)), j));
   }
 
   // ---- Discord: a real gateway session (IDENTIFY → MESSAGE_CREATE).
@@ -184,6 +255,54 @@ module.exports = function initChannels(ctx) {
         } else if (m.op === 0 && m.t === "READY") {
           state.discord = "on";
           log("discord ready as " + (m.d.user && m.d.user.username));
+          // Register the native "/" slash commands ONCE per process (global,
+          // so they work in servers and DMs alike) and clear any leftover
+          // per-guild copies so nothing shows up twice.
+          dcAppId = (m.d.application && m.d.application.id) || (m.d.user && m.d.user.id);
+          if (!dcSlashDone && dcAppId) {
+            dcSlashDone = true;
+            registerSlash(cfg.token, dcAppId, (m.d.guilds || []).map((g) => g.id));
+          }
+        } else if (m.op === 0 && m.t === "INTERACTION_CREATE") {
+          // A native slash command fired. Rebuild the "/cmd arg note" string the
+          // chat commands already understand and answer through the SAME instant
+          // handler — never a slow Director turn (Discord times out at 3s).
+          const d = m.d;
+          if (!d || d.type !== 2 || !d.data) return;   // 2 = APPLICATION_COMMAND
+          const u = (d.member && d.member.user) || d.user || {};
+          const from = u.global_name || u.username || "discord user";
+          const reply = (out) => {
+            const parts = chunk(String(out), 1900);
+            // First line via the interaction callback (must be the initial
+            // response); any overflow rides followup webhooks on the same token.
+            jreq("POST", "discord.com", `/api/v10/interactions/${d.id}/${d.token}/callback`,
+              null, { type: 4, data: { content: parts[0] } }, () => {
+                let i = 1;
+                const next = () => {
+                  if (i >= parts.length) return;
+                  jreq("POST", "discord.com", `/api/v10/webhooks/${dcAppId}/${d.token}`,
+                    null, { content: parts[i++] }, () => next());
+                };
+                next();
+              });
+          };
+          // Pinned to one channel? answer elsewhere ephemerally instead of
+          // letting the interaction time out with a scary error.
+          if (cfg.channel && String(d.channel_id) !== String(cfg.channel)) {
+            jreq("POST", "discord.com", `/api/v10/interactions/${d.id}/${d.token}/callback`,
+              null, { type: 4, data: { content: "คำสั่งนี้ใช้ได้เฉพาะห้องที่ตั้งไว้", flags: 64 } }, () => {});
+            return;
+          }
+          const opts = (d.data.options) || [];
+          const byName = {};
+          opts.forEach((o) => (byName[o.name] = o.value));
+          // id before note, then any other option values — independent of the
+          // order Discord delivered them in.
+          const ordered = ["id", "note"].filter((n) => byName[n] != null).map((n) => byName[n])
+            .concat(opts.filter((o) => !["id", "note"].includes(o.name)).map((o) => o.value));
+          const text = "/" + d.data.name + (ordered.length ? " " + ordered.join(" ") : "");
+          if (typeof ctx.onInteraction === "function") ctx.onInteraction("discord", from, text, reply);
+          else reply("คำสั่งนี้ยังไม่รองรับ");
         } else if (m.op === 0 && m.t === "MESSAGE_CREATE") {
           const d = m.d;
           if (!d || !d.content || (d.author && d.author.bot)) return;
@@ -192,7 +311,8 @@ module.exports = function initChannels(ctx) {
           ctx.onMessage("discord", from, d.content,
             (reply) => sendDiscord(cfg.token, d.channel_id, reply),
             () => jreq("POST", "discord.com", `/api/v10/channels/${d.channel_id}/typing`,
-              { authorization: "Bot " + cfg.token }, null, () => {}));
+              { authorization: "Bot " + cfg.token }, null, () => {}),
+            (file, caption, cb) => sendDiscordFile(cfg.token, d.channel_id, file, caption, cb));
         } else if (m.op === 9) {      // invalid session → re-identify fresh
           try { sock.close(); } catch {}
         }
@@ -215,6 +335,33 @@ module.exports = function initChannels(ctx) {
         { authorization: "Bot " + token }, { content: parts[i] }, () => sendNext(i + 1));
     };
     sendNext(0);
+  }
+  // Post a local file as a real Discord attachment (multipart upload).
+  function sendDiscordFile(token, channelId, filePath, caption, cb) {
+    let buf;
+    try { buf = fs.readFileSync(filePath); } catch (e) { return cb && cb(e); }
+    jpostMultipart("discord.com", `/api/v10/channels/${channelId}/messages`,
+      { authorization: "Bot " + token },
+      { payload_json: JSON.stringify(caption ? { content: String(caption).slice(0, 1900) } : {}) },
+      [{ name: "files[0]", filename: path.basename(filePath), contentType: "image/png", buffer: buf }],
+      (e, j, st) => cb && cb(e || (st >= 200 && st < 300 ? null : new Error("discord upload " + st)), j));
+  }
+  // Register our slash-command set — once per process, via idempotent bulk PUT.
+  // GLOBAL only: a global command already works in every server AND in DMs.
+  // Registering per-guild on top of that makes Discord show every command
+  // TWICE (it does NOT dedupe same-named global+guild), so we instead CLEAR any
+  // guild commands an earlier build may have left behind (PUT an empty array).
+  function registerSlash(token, appId, guildIds) {
+    if (!appId) return;
+    const put = (p, body, where) => jreq("PUT", "discord.com", p,
+      { authorization: "Bot " + token }, body, (e, j, st) => {
+        if (e) log("slash " + where + " failed: " + e.message);
+        else if (st >= 400) log("slash " + where + " " + st + ": " + (j && (j.message || JSON.stringify(j))));
+        else log("slash " + where + " ok");
+      });
+    put(`/api/v10/applications/${appId}/commands`, SLASH_DEFS, "global register");
+    for (const g of guildIds || [])
+      put(`/api/v10/applications/${appId}/guilds/${g}/commands`, [], "guild " + g + " clear");
   }
 
   // ---- LINE: webhook in, push out (reply tokens die in a minute — agents

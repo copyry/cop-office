@@ -7,13 +7,53 @@ in-app 🔄 update banner. Versions follow [semver](https://semver.org).
 ## [Unreleased]
 
 **Added**
-- **🪟 Windowed mode (macOS).** Set `BAGIDEA_WINDOW=1` to run the world as a
-  normal framed, movable window (3/4 of the screen, centred) — no desktop embed —
-  while still getting the floating chat head + tray from the shell. Opt-in only;
-  unset keeps the original `--wallpaper` desktop behaviour, and Windows is
-  untouched.
+- **📨 Run the whole office from a chat channel.** Telegram / Discord / LINE got a
+  real control surface — not just "message in, answer out":
+  - **Approve proposals from your phone.** New slash commands: `/proposals` (list
+    what's pending), `/proposal <id>` (full detail), `/approve <id> [note]` and
+    `/reject <id> [note]` — all sharing the *exact* logic of the in-app approve
+    button (one `respondProposal()` helper, no duplicated behaviour). A **new
+    proposal also pushes a one-line nudge** into every connected channel so you
+    can act without opening the app.
+  - **Progress while the Director works.** Long orders no longer go silent: as the
+    Director delegates, short lines ride back to the *same* chat — `🛠 ส่งให้ <agent>
+    แล้ว…`, `✅ <agent> เสร็จแล้ว`, `⚠️ <agent> ติดปัญหา` — coalesced to at most one
+    push per ~3s, on top of (never replacing) the final answer. Bound strictly to
+    the originating channel turn, so overlay/CLI work never leaks to a channel.
+    Opt out with `channelProgress: false` in the registry.
+  - **`/ask <agent> <message>`** fires one teammate **directly**, bypassing the
+    Director (name or id, case-insensitive, multi-word names supported); the
+    agent's reply rides back prefixed with `💬 <name>:`.
+  - **Generated images ride back to the chat.** When an agent uses the `/gen/image`
+    tool during a channel turn, the PNG is uploaded to that chat as a real
+    photo/attachment (Telegram `sendPhoto` + Discord file upload, hand-rolled
+    zero-dep multipart). Falls back to a text note if the upload fails — the turn
+    never sinks.
+- **Native Discord slash commands.** The office registers `/status /agents
+  /projects /who /proposals /proposal /approve /reject /help` with Discord, so
+  they show up in the `/` picker with autocomplete (registered globally; needs the
+  bot's `applications.commands` scope). The plain-text `/commands` still work on
+  every channel.
+- **🔄 "Restart daemon" in the tray.** Kills whatever is listening on the daemon
+  port (even a manually-started `node server.js`) and brings a fresh one up in its
+  place, then reloads the overlay — no full app restart needed. The respawn is
+  tracked so quitting still reaps it, and node is located robustly (Homebrew/nvm
+  paths) for Finder-launched apps.
+
+**Changed**
+- **🪟 Windowed mode is now the DEFAULT on macOS.** The world runs as a normal
+  framed, movable window (3/4 of the screen, centred) with the floating chat head
+  + tray — no desktop embed. Opt back into the experimental `--wallpaper`
+  desktop embed with `BAGIDEA_WINDOW=0`. Windows is untouched.
 
 **Fixed**
+- **macOS project registration.** `createProject` no longer force-converts `/` to
+  `\` (a Windows-ism that mangled `/Users/…` paths into a junk folder under the
+  daemon's cwd) — paths are now kept native per-platform.
+- **macOS folder picker.** The in-house "📂 choose folder" dialog now starts at
+  your home folder (instead of a non-existent `C:\`), uses `/` separators, and
+  offers Home + filesystem-root quick jumps. Windows drive-letter behaviour is
+  unchanged.
 - **macOS clipboard shortcuts in the overlay.** ⌘X/⌘C/⌘V/⌘A now work inside the
   overlay/popup chat webviews (a standard Edit menu is installed at startup);
   previously paste silently did nothing on macOS.

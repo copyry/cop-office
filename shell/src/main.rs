@@ -18,6 +18,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // Flipped true the moment the user quits from the tray, so the daemon watchdog
 // stops resurrecting the daemon we're deliberately tearing down.
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+// Held true during a deliberate tray "Restart daemon": we kill the daemon and
+// respawn it ourselves, so the watchdog must NOT race in its own replacement.
+static RESTARTING: AtomicBool = AtomicBool::new(false);
 
 use tao::{
     dpi::{LogicalPosition, LogicalSize},
@@ -166,11 +169,66 @@ fn daemon_running() -> bool {
     .is_ok()
 }
 
+// Kill WHATEVER process is listening on the daemon port — not just the child we
+// spawned. The daemon may have been started outside the shell (a manual `node
+// server.js`, or one left over from a previous run), in which case we hold no
+// Child handle for it; "Restart daemon" must still be able to take it down.
+fn kill_daemon_listeners() {
+    #[cfg(not(target_os = "windows"))]
+    {
+        // lsof lists the PIDs holding tcp:8787; SIGKILL each.
+        if let Ok(out) = Command::new("lsof").args(["-ti", "tcp:8787"]).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let pid = line.trim();
+                if !pid.is_empty() {
+                    let _ = Command::new("kill").args(["-9", pid]).status();
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // netstat → the PID in the last column of the :8787 LISTENING row.
+        if let Ok(out) = hidden(Command::new("cmd").args(["/C", "netstat -ano -p tcp"]))
+            .output()
+        {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                if line.contains(":8787") && line.to_uppercase().contains("LISTENING") {
+                    if let Some(pid) = line.split_whitespace().last() {
+                        let _ = hidden(Command::new("taskkill").args(["/F", "/PID", pid]))
+                            .status();
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn spawn_daemon(root: &PathBuf) -> Option<Child> {
     if daemon_running() {
         return None;
     }
-    let mut c = Command::new("node");
+    spawn_daemon_force(root)
+}
+
+// Resolve the node binary. A Finder-launched app gets a minimal PATH (no
+// Homebrew/nvm), so a bare "node" can fail to spawn — probe the usual install
+// locations first, then fall back to a PATH lookup (covers terminal launches).
+fn node_bin() -> String {
+    #[cfg(not(target_os = "windows"))]
+    for p in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
+        if std::path::Path::new(p).exists() {
+            return p.to_string();
+        }
+    }
+    "node".to_string()
+}
+
+// Launch node on the daemon UNCONDITIONALLY (no running-check). Used by the
+// tray "Restart daemon" once it has already killed the old process — there the
+// running-guard in spawn_daemon would wrongly no-op while the port frees up.
+fn spawn_daemon_force(root: &PathBuf) -> Option<Child> {
+    let mut c = Command::new(node_bin());
     c.arg(root.join("daemon").join("server.js"));
     // A release GUI shell has NO console (windows_subsystem="windows"), so an
     // INHERITED stdout/stderr is an invalid handle and node can crash on its
@@ -843,19 +901,19 @@ mod platform {
     }
 
     pub fn office_args(c: &mut Command, root: &PathBuf, _cx: i32, _cy: i32) {
-        // Opt-in window mode (BAGIDEA_WINDOW=1): run the world as a normal framed
-        // window — no desktop embed. Still keeps the chat head + tray from the
-        // shell. Anything else keeps the original wallpaper behaviour exactly.
-        if std::env::var("BAGIDEA_WINDOW").as_deref() == Ok("1") {
+        // Windowed mode is now the DEFAULT on macOS: the world runs as a normal
+        // framed, movable window (no desktop embed), keeping the chat head + tray
+        // from the shell. Opt back into the experimental desktop-level wallpaper
+        // embed with BAGIDEA_WINDOW=0.
+        if std::env::var("BAGIDEA_WINDOW").as_deref() != Ok("0") {
             c.args(["--path"]).arg(root.join("godot")).args(["--", "--windowed"]);
             // No DYLD shim: we do NOT want the desktop-level attach in window mode.
             return;
         }
-        // Stage A: a normal windowed office (the desktop-level embed comes from
-        // the DYLD shim in a follow-up). Still passes --wallpaper so the world
-        // reports ready the same way.
+        // Legacy wallpaper embed (opt-in via BAGIDEA_WINDOW=0): a normal windowed
+        // office that the DYLD shim drops to desktop level. Still passes
+        // --wallpaper so the world reports ready the same way.
         c.args(["--path"]).arg(root.join("godot")).args(["--", "--wallpaper"]);
-        // If a built shim is present, inject it so Godot drops to desktop level.
         let shim = root.join("shell").join("macos").join("libwallpaper_shim.dylib");
         if shim.exists() {
             c.env("DYLD_INSERT_LIBRARIES", shim);
@@ -1261,7 +1319,8 @@ fn main() {
             if SHUTTING_DOWN.load(Ordering::Relaxed) {
                 break;
             }
-            if !daemon_running() && !SHUTTING_DOWN.load(Ordering::Relaxed) {
+            if !daemon_running() && !SHUTTING_DOWN.load(Ordering::Relaxed)
+                && !RESTARTING.load(Ordering::Relaxed) {
                 let _ = spawn_daemon(&root);
             }
         });
@@ -1272,12 +1331,14 @@ fn main() {
     let open_item = MenuItem::new("Open Office Chat", true, None);
     let hide_item = CheckMenuItem::new("Hide office (agents keep working)", true, false, None);
     let autostart_item = CheckMenuItem::new(platform::AUTOSTART_LABEL, true, platform::is_autostart(), None);
+    let restart_item = MenuItem::new("Restart daemon (reload office brain)", true, None);
     let exit_item = MenuItem::new("Exit BagIdea Office", true, None);
     let _ = tray_menu.append_items(&[
         &open_item,
         &hide_item,
         &autostart_item,
         &PredefinedMenuItem::separator(),
+        &restart_item,
         &exit_item,
     ]);
     let _tray = TrayIconBuilder::new()
@@ -1289,6 +1350,7 @@ fn main() {
     let open_id = open_item.id().clone();
     let hide_id = hide_item.id().clone();
     let autostart_id = autostart_item.id().clone();
+    let restart_id = restart_item.id().clone();
     let exit_id = exit_item.id().clone();
 
     platform::spawn_hotkey_thread(event_loop.create_proxy());
@@ -1383,6 +1445,10 @@ fn main() {
     let mut popups: Vec<(tao::window::WindowId, String, Window, wry::WebView)> = Vec::new();
     let mut mini = false;
     let mut feed = false;
+    // When set, the overlay webview is reloaded once this instant passes — used
+    // after a tray "Restart daemon" so it reconnects to the fresh daemon (and
+    // picks up any overlay.html/JS changes) without blocking the event loop.
+    let mut reload_overlay_at: Option<std::time::Instant> = None;
     let mut editor_pid: u32 = 0;
     let mut world_ready = false;
     // Tracks whether the wallpaper is believed visible (30 fps) vs throttled
@@ -1437,6 +1503,37 @@ fn main() {
                 post_visibility(!hidden);
             } else if ev.id == autostart_id {
                 platform::set_autostart(autostart_item.is_checked());
+            } else if ev.id == restart_id {
+                // Kill the daemon and bring a fresh one up in its place, kept in
+                // daemon_child so quitting still reaps it. RESTARTING holds the
+                // watchdog off so it can't race in its own replacement; the
+                // brief port-free wait keeps the respawn from hitting EADDRINUSE.
+                RESTARTING.store(true, Ordering::Relaxed);
+                if let Some(c) = daemon_child.as_mut() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                daemon_child = None;
+                // Also take down a daemon the shell didn't spawn (manual `node
+                // server.js`, or a leftover) — otherwise it keeps the port and
+                // the respawn below silently hits EADDRINUSE and dies.
+                kill_daemon_listeners();
+                for _ in 0..20 {
+                    if !daemon_running() { break; }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                daemon_child = spawn_daemon_force(&root);
+                RESTARTING.store(false, Ordering::Relaxed);
+                // Give it ~1.2s to bind, then reload the overlay (non-blocking).
+                reload_overlay_at = Some(std::time::Instant::now()
+                    + std::time::Duration::from_millis(1200));
+            }
+        }
+
+        if let Some(t) = reload_overlay_at {
+            if std::time::Instant::now() >= t {
+                let _ = overlay_view.load_url("http://127.0.0.1:8787/");
+                reload_overlay_at = None;
             }
         }
 

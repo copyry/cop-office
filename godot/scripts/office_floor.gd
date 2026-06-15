@@ -171,7 +171,7 @@ func _opaque_after_first_frame() -> void:
 		DisplayServer.window_set_position(Vector2i.ZERO)
 		DisplayServer.window_set_size(DisplayServer.screen_get_size())
 	elif "--windowed" in args:
-		# Window mode (BAGIDEA_WINDOW=1): a normal framed, movable window sized
+		# Window mode (macOS default; BAGIDEA_WINDOW=0 = legacy wallpaper) sized
 		# to 3/4 of the screen and centred — same handoff as _enter_editor_mode().
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)

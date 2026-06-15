@@ -151,7 +151,7 @@ Sponsorship is a **recurring monthly subscription handled entirely by GitHub Spo
 
 ### 🎤 Voice, channels, memory & media (2026-06)
 - **Voice in / out**: hold-to-record in the webview → **OpenAI Whisper / Gemini** transcription (no Windows dictation panel); **F6** speaks a command straight to the CEO; agents can be given **Gemini TTS voices** — **16 presets split clearly ♀ / ♂** (8 each), each its own emotion/style, per-agent, gimmick `SPEAK:` announcements; **📞 realtime voice chat** (the **main agent only**) bridges your mic to **Gemini Live** in the main agent's assigned voice (or a sensible default), with the office's own knowledge in context
-- **Channels**: connect **Telegram / Discord / LINE** — messages enter the CEO flow, the Director answers back on the same channel
+- **Channels**: connect **Telegram / Discord / LINE** — messages enter the CEO flow, the Director answers back on the same channel, with **slash commands** (incl. native Discord ones), proposal approve/reject from your phone, `/ask <agent>` to hit one teammate directly, **live progress lines** while the Director delegates, and **generated images pushed back** to the chat
 - **Hermes-style memory** (token-lean, relevance-retrieved): shared `workspace/OFFICE.md` (owner) + per-agent `workspace/memory/<id>.md` + per-project `workspace/projects/<id>/MEMORY.md`, distilled automatically after real work. A pure on-device keyword index (BM25, zero deps, works in Thai too) injects only the memories **relevant to the task at hand** — not a blind dump — with full recall on demand via `GET /recall` + the `archive-search` skill
 - **Main API keys + feature gates**: `OPENAI_API_KEY` / `GEMINI_API_KEY` are first-class — voice/TTS/image/realtime grey out with guidance until set; an extra-key vault feeds agents' own env
 - **Attachments & media**: paperclip / drag-drop upload; chat renders images, video, audio inline (**click any image to view it full-size**); every message is **timestamped**; agents produce images via the `/gen/image` **system tool** and they appear automatically
@@ -181,9 +181,13 @@ Sponsorship is a **recurring monthly subscription handled entirely by GitHub Spo
 - **Claude Code hooks integration**: any Claude Code session in this project reports its tool calls — your real work animates the Director automatically
 - **Permission broker**: tools you *granted* in an agent's profile run silently; anything else is held until you approve — with a **✓✓ forever** option that remembers the grant
 - **📁 Projects**: register real folders as projects (with PLACE shorthands like `"ห้องเรียน" → D:\Learning`); the Director creates new ones himself via a `PROJECT:` protocol line and routes work with `DELEGATE: <agent> @ <project> :: <job>` — the assignee's claude session lives **inside** that directory and is resumable by you. One window per project: ▶ opens (or surfaces) *the* window. **One occupant at a time** — while an agent works the project you can't open it (the row shows a **⏹ stop agent** button with a two-click confirm to take over), and while you have it open an agent won't be dispatched into it. Removing/deleting a project also closes its window; disk-deletes sweep leftover dev servers first
-- **📨 Channels**: Telegram (long-poll), Discord (native gateway client) and LINE (webhook) feed straight into the Director — order your office from your phone, the reply comes back on the same channel
+- **📨 Channels**: Telegram (long-poll), Discord (native gateway client) and LINE (webhook) feed straight into the Director — order your office from your phone, the reply comes back on the same channel. A full **control surface** rides on top:
+  - **Slash commands**: `/status` `/agents` `/projects` `/who` · proposals from your phone — `/proposals` (pending list), `/proposal <id>`, `/approve <id> [note]`, `/reject <id> [note]` (same logic as the in-app button) · `/ask <agent> <message>` fires one teammate **directly**, bypassing the Director · `/help` lists them all. A **new proposal also pushes a one-line nudge** into every connected channel
+  - **Native Discord slash commands**: the same set is registered with Discord, so they appear in the `/` picker with autocomplete (needs the bot's `applications.commands` scope); plain-text commands keep working everywhere
+  - **Progress relay**: while the Director delegates a long order, short status lines (`🛠 ส่งให้ … แล้ว`, `✅ เสร็จแล้ว`, `⚠️ ติดปัญหา`) stream back to the same chat — coalesced (~1 per 3s), bound to the originating channel turn so overlay/CLI work never leaks (opt out: `channelProgress: false`)
+  - **Image relay**: an image an agent generates mid-turn is uploaded back to the chat as a real photo/attachment (zero-dep multipart), with a text fallback if upload fails
 - **🔑 API key vault**: store `OPENAI_API_KEY` & friends once; they're injected into every agent run's environment, and agents are told which names exist
-- **♻️ Self-healing daemon**: a watchdog respawns the daemon if it ever dies, and `bagidea restart` is more resilient — the office stays up on its own
+- **♻️ Self-healing daemon**: a watchdog respawns the daemon if it ever dies, and `bagidea restart` is more resilient — the office stays up on its own. A **🔄 Restart daemon** tray item kills whatever holds the daemon port (even a manual `node server.js`) and brings a fresh one up, then reloads the overlay — handy after editing the daemon, no full app restart needed
 - **🔄 Self-updating (version-gated)**: a `VERSION` file marks releases. The daemon compares the local `VERSION` with the one on `main` and only raises the in-app banner on a real version bump — routine commits and dev-branch work never nag users. The banner (or `bagidea update`) pulls, rebuilds what changed, and relaunches. `bagidea version` shows the current build and whether an update is out (release flow: [`RELEASING.md`](RELEASING.md))
 - **🪟 Start with Windows**: launch the office on boot — toggle it from the tray, settings (⚙ → AGENTS), or `bagidea startup on|off` (all share one HKCU Run key). Windows-only for now — autostart isn't wired on macOS yet
 
@@ -620,8 +624,9 @@ this makes them employable"*).
 - [x] **Plugin ecosystem** — core vs installed plugins, 🧮 Calculator, GitHub install, official template + example repos
 - [x] **14-language UI**, **builtin agent skill library** (9 packs), open-source clone+build installer, `bagidea restart`
 - [x] **Social groups** (3–4 agents) → plugin-oriented proposals with approve/reject notes; **main-only calls** with assigned voices
-- [ ] Wake word; channel round-trip reports (delegate results back to the channel)
-- [x] macOS wallpaper backend (beta)
+- [x] **Channel control surface** — slash commands (incl. native Discord), phone-side proposal approve/reject, `/ask <agent>`, **progress round-trip** while delegating, generated images pushed back to the chat
+- [ ] Wake word
+- [x] macOS wallpaper backend (beta) + **windowed mode is now the default on macOS** (`BAGIDEA_WINDOW=0` for the legacy desktop embed)
 - [ ] Linux wallpaper backend
 - [ ] Signed binary releases (skip the Rust build on install)
 
