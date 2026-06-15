@@ -394,9 +394,23 @@ module.exports = function initChannels(ctx) {
     }
   }
 
+  // Split a long message into channel-sized parts. The hard part is the tail:
+  // the old form capped at 5 parts and SILENTLY dropped everything past 5×n, so
+  // long relays (summaries, instructions) lost their end at a fixed offset
+  // (Discord ~9.5k, Telegram ~19.5k chars). We now emit every part needed up to
+  // a high anti-flood bound; if a message is still longer than that, the cut is
+  // made VISIBLE with a marker instead of vanishing without a trace.
+  const MAX_PARTS = 20;
   function chunk(s, n) {
+    s = String(s);
     const out = [];
-    for (let i = 0; i < s.length && out.length < 5; i += n) out.push(s.slice(i, i + n));
+    let i = 0;
+    for (; i < s.length && out.length < MAX_PARTS; i += n) out.push(s.slice(i, i + n));
+    if (i < s.length && out.length) {           // hit the cap with text still left
+      const left = s.length - i;
+      const note = ` …(+${left} อักษรถูกตัด)`;
+      out[out.length - 1] = out[out.length - 1].slice(0, Math.max(0, n - note.length)) + note;
+    }
     return out.length ? out : [""];
   }
 
