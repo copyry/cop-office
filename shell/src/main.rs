@@ -806,6 +806,27 @@ mod platform {
         }
     }
 
+    /// Register the `bagidea://` URL protocol (per-user) so the website's
+    /// "Open in office" Install button launches us with the deep link. Idempotent
+    /// — written on every normal startup so it self-heals after a move/reinstall.
+    pub fn register_uri_scheme() {
+        let exe = match std::env::current_exe() {
+            Ok(e) => e.to_string_lossy().into_owned(),
+            Err(_) => return,
+        };
+        let base = r"HKCU\Software\Classes\bagidea";
+        let run = |args: &[&str]| {
+            let mut c = Command::new("reg");
+            c.args(args);
+            let _ = super::hidden(&mut c).status();
+        };
+        run(&["add", base, "/ve", "/t", "REG_SZ", "/d", "URL:BagIdea Office", "/f"]);
+        run(&["add", base, "/v", "URL Protocol", "/t", "REG_SZ", "/d", "", "/f"]);
+        let cmd_key = format!(r"{}\shell\open\command", base);
+        let cmd_val = format!("\"{}\" \"%1\"", exe);
+        run(&["add", &cmd_key, "/ve", "/t", "REG_SZ", "/d", &cmd_val, "/f"]);
+    }
+
     // Scan state for `occl_cb` — an EnumWindows pass that flips `occluded` true
     // the moment any normal window covers the primary monitor.
     struct OcclScan { own_pid: u32, occluded: bool }
@@ -1129,6 +1150,10 @@ mod platform {
 
     pub fn restore_wallpaper() {}
 
+    // macOS deep-link registration is declared in the app bundle's Info.plist
+    // (CFBundleURLTypes), not at runtime — so this is a no-op here.
+    pub fn register_uri_scheme() {}
+
     /// True when a foreground app window (nearly) covers the whole screen, so
     /// the wallpaper is invisible and the renderer can crawl. Considers only
     /// layer-0 windows (skips the menu bar, Dock, and our desktop-level Godot
@@ -1244,6 +1269,7 @@ mod platform {
     pub fn is_autostart() -> bool { false }
     pub fn set_autostart(_on: bool) {}
     pub fn restore_wallpaper() {}
+    pub fn register_uri_scheme() {}
     pub fn desktop_occluded(_lw: f64, _lh: f64, _own_pid: u32) -> bool { false }
 }
 
@@ -1273,11 +1299,93 @@ fn chrome_window(
 }
 
 // --------------------------------------------------------------------- main
+// Hand a `bagidea://install?repo=<url>` deep link to the running office over the
+// daemon's localhost port. We don't install here — the daemon broadcasts an
+// intent and the office UI asks the user to confirm. Returns true if delivered.
+fn forward_deep_link(url: &str) -> bool {
+    use std::io::{Read, Write};
+    let rest = url.trim_start_matches("bagidea://");
+    // only the install intent is supported
+    let repo = match rest.split_once("repo=") {
+        Some((_, r)) => percent_decode(r.split('&').next().unwrap_or("")),
+        None => return false,
+    };
+    if repo.is_empty() {
+        return false;
+    }
+    let body = format!("{{\"repo\":{}}}", json_quote(&repo));
+    let req = format!(
+        "POST /plugins/intent HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n\
+         x-bagidea-ui: 1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    match std::net::TcpStream::connect(("127.0.0.1", 8787)) {
+        Ok(mut s) => {
+            let _ = s.set_write_timeout(Some(std::time::Duration::from_secs(2)));
+            if s.write_all(req.as_bytes()).is_err() {
+                return false;
+            }
+            let _ = s.flush();
+            // read a little so the daemon finishes handling before we drop
+            let _ = s.set_read_timeout(Some(std::time::Duration::from_millis(700)));
+            let mut buf = [0u8; 64];
+            let _ = s.read(&mut buf);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' if i + 3 <= b.len() => match u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                Ok(v) => { out.push(v); i += 3; }
+                Err(_) => { out.push(b'%'); i += 1; }
+            },
+            b'+' => { out.push(b' '); i += 1; }
+            c => { out.push(c); i += 1; }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn json_quote(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            c if (c as u32) < 0x20 => {}
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
 fn main() {
+    // bagidea:// deep link (the website's "Open in office" Install button)?
+    // Hand it to the running office — which asks the user to confirm before
+    // installing — then exit. If the office isn't up, the forward fails and we
+    // fall through to a normal launch (the office opens; click Install again).
+    if let Some(url) = std::env::args().skip(1).find(|a| a.starts_with("bagidea://")) {
+        if forward_deep_link(&url) {
+            return;
+        }
+    }
+
     // Single instance: a second launch exits immediately.
     if !platform::ensure_single_instance() {
         return;
     }
+    // Make the website's one-click install reach us (idempotent; self-heals).
+    platform::register_uri_scheme();
 
     use wry::WebViewBuilder;
 

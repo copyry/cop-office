@@ -2576,6 +2576,39 @@ const server = http.createServer((req, res) => {
     try { res.end(fs.readFileSync(path.join(__dirname, "toolshub.html"))); }
     catch { res.end("<p>tools hub unavailable</p>"); }
 
+  } else if (req.method === "GET" && req.url.split("?")[0] === "/pluginshub") {
+    // Plugins Hub — the community plugin catalog, browse + one-click install.
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    try { res.end(fs.readFileSync(path.join(__dirname, "pluginshub.html"))); }
+    catch { res.end("<p>plugins hub unavailable</p>"); }
+
+  } else if (req.method === "GET" && req.url.split("?")[0] === "/plugins/catalog") {
+    // The community plugin catalog — fetched LIVE from the website (so PR-curated
+    // additions show up without waiting for an office update), falling back to the
+    // copy bundled in the repo so it always works offline. Server-side fetch = no
+    // CORS dance for the hub page.
+    const sendLocal = () => {
+      let txt = '{"plugins":[]}';
+      try { txt = fs.readFileSync(path.join(__dirname, "..", "web", "plugins.json"), "utf8"); } catch {}
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+      res.end(txt);
+    };
+    try {
+      const https = require("https");
+      const rq = https.get(
+        "https://raw.githubusercontent.com/bagidea/bagidea-office/main/web/plugins.json",
+        { timeout: 3500, headers: { "user-agent": "bagidea-office" } }, (rs) => {
+          if (rs.statusCode !== 200) { rs.resume(); return sendLocal(); }
+          let d = ""; rs.on("data", (c) => (d += c));
+          rs.on("end", () => {
+            try { JSON.parse(d); res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }); res.end(d); }
+            catch { sendLocal(); }
+          });
+        });
+      rq.on("error", sendLocal);
+      rq.on("timeout", () => { rq.destroy(); sendLocal(); });
+    } catch { sendLocal(); }
+
   } else if (req.method === "GET" && /^\/brand\/logo[a-z_]*\.png$/.test(req.url)) {
     const f = path.join(__dirname, "..", "godot", "assets", "brand", req.url.split("/").pop());
     fs.readFile(f, (e, data) => {
@@ -3486,6 +3519,22 @@ const server = http.createServer((req, res) => {
       } catch (e) { res.writeHead(400, { "content-type": "text/plain; charset=utf-8" }); res.end(String(e.message)); }
     });
 
+  } else if (req.method === "POST" && req.url === "/plugins/intent") {
+    // A bagidea:// deep link (from the web Plugins page) asking to install a
+    // plugin. We do NOT install here — we broadcast an intent so the OFFICE asks
+    // the user to confirm first. A web page must never silently install code.
+    readBody(req, (body) => {
+      try {
+        if (!req.headers["x-bagidea-ui"]) { res.writeHead(403); return res.end("human UI only"); }
+        let repo = String(JSON.parse(body || "{}").repo || "").trim();
+        if (!/^https:\/\/(github\.com|gitlab\.com|[\w.-]+)\/[\w.\-/]+$/.test(repo))
+          throw new Error("bad repo url");
+        broadcast({ type: "plugin.intent", repo }, false);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) { res.writeHead(400); res.end(String(e.message)); }
+    });
+
   } else if (req.method === "POST" && req.url === "/plugins/remove") {
     readBody(req, (body) => {
       try {
@@ -3958,6 +4007,28 @@ const server = http.createServer((req, res) => {
   } else if (req.method === "GET" && req.url === "/proposals") {
     res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ proposals: proposals.slice(-30).reverse() }));
+
+  } else if (req.method === "POST" && req.url === "/proposals/dismiss") {
+    // 🧹 Quietly clear pending proposals off the owner's plate — bulk or all.
+    // Unlike "reject", this sends NO message to the team and makes no noise in
+    // the feed; it just marks them dismissed so they drop out of the list.
+    readBody(req, (body) => {
+      try {
+        if (!req.headers["x-bagidea-ui"]) { res.writeHead(403); return res.end("human UI only"); }
+        const p = JSON.parse(body || "{}");
+        const ids = p.all ? null : new Set(p.ids || []);
+        let n = 0;
+        for (const pr of proposals) {
+          if (pr.status !== "pending") continue;
+          if (ids && !ids.has(pr.id)) continue;
+          pr.status = "dismissed"; n++;
+        }
+        if (n) saveProposals();
+        broadcast({ type: "proposals.dismissed", count: n }, false);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, dismissed: n }));
+      } catch (e) { res.writeHead(400); res.end(String(e.message)); }
+    });
 
   } else if (req.method === "POST" && req.url === "/proposals/respond") {
     // CEO verdict on a team pitch: approve → a real project is born in the

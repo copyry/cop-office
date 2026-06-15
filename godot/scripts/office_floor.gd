@@ -75,11 +75,13 @@ func _ready() -> void:
 		# Volumetric froxel pipeline is the big GPU cost — at wallpaper rung
 		# the fake beam cards carry the god-ray look on their own.
 		env.volumetric_fog_enabled = false
-		# Shadow atlas: 2048 was too coarse — shadows nearly vanished at the normal
-		# wallpaper camera (only crisp when zoomed in, where the orthogonal map
-		# concentrates). 4096 keeps them clearly visible + soft without the full
-		# 8192 cost running 24/7.
-		RenderingServer.directional_shadow_atlas_set_size(4096, true)
+		# Shadow atlas: the orthogonal map is fit to the whole view frustum (up to
+		# directional_shadow_max_distance = 100, which must cover the office at the
+		# far wallpaper camera or shadows vanish entirely when zoomed out). Spread
+		# over that large area, 4096 read soft/faint at normal zoom — 8192 packs
+		# enough texels to stay CRISP at the far camera, the same way the map
+		# concentrates when you zoom in. Worth the GPU at the 30 fps wallpaper rung.
+		RenderingServer.directional_shadow_atlas_set_size(8192, true)
 		var cam: Camera3D = $CameraRig/Camera3D
 		cam.attributes.dof_blur_far_enabled = false
 		cam.attributes.dof_blur_near_enabled = false

@@ -58,6 +58,47 @@ in-app 🔄 update banner. Versions follow [semver](https://semver.org).
   overlay/popup chat webviews (a standard Edit menu is installed at startup);
   previously paste silently did nothing on macOS.
 
+## [0.7.16] — One-click install straight from the website
+
+**Added**
+- **Install from the web with one click.** The “Open in office” button on a plugin’s
+  web page now hands the install straight to your running office through a
+  `bagidea://` link. The office always **asks you to confirm first** — a web page
+  can never install code silently — and the copy-link fallback still works if the
+  office isn’t open.
+
+## [0.7.15] — Plugins Hub: a community catalog you can install in one click
+
+**Added**
+- **Plugins Hub.** A curated catalog of community plugins — browse them and install
+  into your running office with a single click. Open it from **⋯ → 🧩 Plugins Hub**
+  (or the button in the Plugins panel). The catalog is fetched live, so newly
+  approved plugins show up without an app update.
+- **A public Plugins page on the website** to discover plugins, copy an install
+  link, and learn how to publish your own.
+- **Anyone can submit a plugin.** Publish it as a GitHub repo, then open a PR adding
+  it to the catalog — every submission is reviewed (plugins run real code on a
+  user's machine). See `docs/guide/plugin-hub.md`.
+
+## [0.7.14] — Safer deletes & clearing team proposals
+
+**Changed**
+- **Deleting in Settings now asks first.** Removing a role, skill, or staff member
+  pops a clear “are you sure?” confirmation — deleting should be a deliberate act,
+  not a stray click.
+- **Clear team proposals in bulk.** The 💡 proposals list now lets you tick several
+  and clear them at once, or clear them all — quietly, with no message sent to the
+  team. Approving still happens one at a time (each spins up a real project).
+
+## [0.7.13] — Shadows back, and crisp at any zoom
+
+**Fixed**
+- **Shadows no longer disappear at the normal camera.** The previous tweak cut the
+  shadow range too short, so the office sat outside it when zoomed out and lost its
+  shadows entirely. The range now covers the whole office, and the shadow map is
+  twice as detailed (and a touch sharper) — so shadows stay crisp from the far
+  diorama view all the way in to a close-up.
+
 ## [0.7.12] — Discussions you can watch, smarter walking & clearer shadows
 
 **Fixed**

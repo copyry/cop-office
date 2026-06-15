@@ -796,6 +796,7 @@
   <div class="opt" id="pluginBtn">🧩 <span>Plugins</span></div>
   <div class="opt" id="workflowBtn">🔀 <span>Workflow Builder</span></div>
   <div class="opt" id="toolshubBtn">🧰 <span>Tools Hub</span></div>
+  <div class="opt" id="pluginshubBtn">🧩 <span>Plugins Hub</span></div>
   <div class="opt" id="editBtn">🎨 <span>จัดออฟฟิศ</span></div>
   <div class="opt" id="discussBtn">🗣 <span>ประชุม agents</span></div>
   <div class="opt" id="mapBtn">🗺 <span>แผนที่</span></div>
@@ -914,6 +915,21 @@
   // DICT["thai"] = { en, zh, ja }
   const DICT = {
     "ยกเลิก": { en: "Cancel", zh: "取消", ja: "キャンセル" },
+    // destructive-delete confirmations + proposal bulk-clear
+    "ลบ": { en: "Delete", zh: "删除", ja: "削除" },
+    "ลบ role": { en: "Delete role", zh: "删除角色", ja: "ロールを削除" },
+    "ลบ skill": { en: "Delete skill", zh: "删除技能", ja: "スキルを削除" },
+    "ลบ agent": { en: "Delete agent", zh: "删除代理", ja: "エージェントを削除" },
+    "role นี้จะถูกลบออกจากรายการ — agents ที่ตั้ง role นี้ไว้จะยังอยู่ แต่ role จะหายไป": { en: "This role is removed from the list — agents already set to it stay, but the role itself is gone.", zh: "该角色将从列表中移除 — 已设为此角色的代理保留，但角色本身消失。", ja: "このロールはリストから削除されます — 設定済みのエージェントは残りますが、ロール自体は消えます。" },
+    "ลบ skill นี้ถาวร — agents ที่ใช้อยู่จะไม่มีทักษะนี้อีก": { en: "Permanently delete this skill — agents using it lose the ability.", zh: "永久删除此技能 — 使用它的代理将失去该能力。", ja: "このスキルを完全に削除します — 使用中のエージェントはこの能力を失います。" },
+    "ลบพนักงานคนนี้ถาวร พร้อมความทรงจำและงานที่ผูกไว้ — กู้คืนไม่ได้": { en: "Permanently delete this staff member, along with their memory and assigned work — this cannot be undone.", zh: "永久删除此员工，连同其记忆和分配的工作 — 此操作无法撤销。", ja: "このスタッフを記憶と割り当てられた作業ごと完全に削除します — 取り消せません。" },
+    "🧹 ล้างที่เลือก": { en: "🧹 Clear selected", zh: "🧹 清除所选", ja: "🧹 選択を消去" },
+    "🧹 ล้างทั้งหมด": { en: "🧹 Clear all", zh: "🧹 全部清除", ja: "🧹 すべて消去" },
+    "🧹 ล้างข้อเสนอที่เลือกแล้ว": { en: "🧹 Cleared the selected proposals", zh: "🧹 已清除所选提案", ja: "🧹 選択した提案を消去しました" },
+    "🧹 ล้างข้อเสนอทั้งหมดแล้ว": { en: "🧹 Cleared all proposals", zh: "🧹 已清除全部提案", ja: "🧹 すべての提案を消去しました" },
+    "ล้างข้อเสนอที่เลือกทิ้ง? ข้อเสนอจะหายไปจากรายการ (ไม่ส่งข้อความถึงทีม)": { en: "Clear the selected proposals? They’ll vanish from the list (no message is sent to the team).", zh: "清除所选提案？它们将从列表中消失（不会通知团队）。", ja: "選択した提案を消去しますか？リストから消えます（チームには通知されません）。" },
+    "ล้างข้อเสนอทั้งหมดทิ้ง? ทุกข้อเสนอจะหายไปจากรายการ (ไม่ส่งข้อความถึงทีม)": { en: "Clear ALL proposals? Every proposal vanishes from the list (no message is sent to the team).", zh: "清除全部提案？所有提案将从列表中消失（不会通知团队）。", ja: "すべての提案を消去しますか？全提案がリストから消えます（チームには通知されません）。" },
+    "เลือกแล้ว": { en: "selected", zh: "已选", ja: "選択済み" },
     "✓ เลือกโฟลเดอร์นี้": { en: "✓ Choose this folder", zh: "✓ 选择此文件夹", ja: "✓ このフォルダを選択" },
     "เพิ่มเติม": { en: "More", zh: "更多", ja: "その他" },
     "🧩 Plugins": { en: "🧩 Plugins", zh: "🧩 插件", ja: "🧩 プラグイン" },
@@ -937,6 +953,7 @@
     // plugins panel
     "ส่วนขยายของออฟฟิศ — คลิกเพื่อเปิดแผง · agents สั่งงาน plugin เหล่านี้ได้": { en: "Office extensions — click to open a panel · agents can drive these plugins", zh: "办公室扩展 — 点击打开面板 · 代理可控制这些插件", ja: "オフィス拡張 — クリックでパネルを開く · エージェントが操作可能" },
     "ยังไม่มี plugin": { en: "No plugins yet", zh: "暂无插件", ja: "プラグインはまだありません" },
+    "🧩 เรียกดู Plugins Hub (ชุมชน) — กดติดตั้งทีเดียว": { en: "🧩 Browse the Plugins Hub (community) — one-click install", zh: "🧩 浏览插件中心（社区）— 一键安装", ja: "🧩 プラグインハブを見る（コミュニティ）— ワンクリックでインストール" },
     "โหลด plugins ใหม่": { en: "Reload plugins", zh: "重新加载插件", ja: "プラグインを再読み込み" },
     "เปิดแผง": { en: "Open panel", zh: "打开面板", ja: "パネルを開く" },
     "คำสั่ง": { en: "commands", zh: "命令", ja: "コマンド" },
@@ -1918,6 +1935,11 @@
       addFeed(ev.agent, "💡 ทีมเสนอโปรเจคใหม่: " + ev.name + " — รออนุมัติใน 🗂 TASKS", "", "alert");
     else if (ev.type === "memory.learned")
       addFeed(ev.agent, "🧠 จดความจำใหม่ " + ev.count + " ข้อ", "");
+    else if (ev.type === "plugin.intent" && ev.repo) {
+      // A bagidea:// "install" deep link reached the office. Open the Plugins Hub
+      // window pre-loaded with this repo for a CONFIRM-then-install — never silent.
+      popWindow("/pluginshub?install=" + encodeURIComponent(ev.repo), "🧩 Plugins Hub", "pluginshub", { w: 880, h: 720 });
+    }
   }
 
   function addPermCard(ev) {
@@ -2532,8 +2554,11 @@
         row.style.cursor = "default";
         row.innerHTML = `<div class="meta"><b>${r}</b></div>` +
           `<div class="winbtn hide" title="Remove role">✕</div>`;
-        row.querySelector(".winbtn").onclick = () =>
+        row.querySelector(".winbtn").onclick = async () => {
+          if (!await confirmDanger(`${t("ลบ role")}: ${r}`,
+              t("role นี้จะถูกลบออกจากรายการ — agents ที่ตั้ง role นี้ไว้จะยังอยู่ แต่ role จะหายไป"), t("ลบ role"))) return;
           api("/registry/role", { name: r, remove: true }).then(() => openSettings("roles"));
+        };
         list.appendChild(row);
       }
       modalCard.querySelector("#addRole").onclick = () => {
@@ -2571,6 +2596,7 @@
     };
     const del = modalCard.querySelector("#sDel");
     if (del) del.onclick = async () => {
+      if (!await confirmDanger(t("ลบ skill"), t("ลบ skill นี้ถาวร — agents ที่ใช้อยู่จะไม่มีทักษะนี้อีก"), t("ลบ skill"))) return;
       await api("/registry/skill", { id, remove: true });
       openSettings("skills");
     };
@@ -2802,6 +2828,8 @@
     };
     const del = modalCard.querySelector("#eDel");
     if (del) del.onclick = async () => {
+      if (!await confirmDanger(`${t("ลบ agent")}: ${(a && a.name) || id}`,
+          t("ลบพนักงานคนนี้ถาวร พร้อมความทรงจำและงานที่ผูกไว้ — กู้คืนไม่ได้"), t("ลบ agent"))) return;
       await api("/registry/agent/delete", { id });
       closeModal();
     };
@@ -2924,6 +2952,11 @@
     document.getElementById("moreMenu").classList.remove("open");
     popWindow("/toolshub", "🧰 Tools Hub", "toolshub", { w: 860, h: 720 });
   };
+  // 🧩 Plugins Hub — community plugin catalog, one-click install, its own window
+  document.getElementById("pluginshubBtn").onclick = () => {
+    document.getElementById("moreMenu").classList.remove("open");
+    popWindow("/pluginshub", "🧩 Plugins Hub", "pluginshub", { w: 880, h: 720 });
+  };
   // 🎨 opens the full standalone 3D editor window (the daemon launches Godot).
   document.getElementById("editBtn").onclick = () => {
     api("/editor/open", {});
@@ -2933,7 +2966,8 @@
     modal.classList.add("open");
     const r = await fetch("/plugins").then((x) => x.json()).catch(() => ({ plugins: [] }));
     modalCard.innerHTML = hdr("🧩 PLUGINS") +
-      `<div style="font-size:11px;color:var(--dim);margin-bottom:10px">ส่วนขยายของออฟฟิศ — คลิกเพื่อเปิดแผง · agents สั่งงาน plugin เหล่านี้ได้</div>
+      `<div style="font-size:11px;color:var(--dim);margin-bottom:8px">ส่วนขยายของออฟฟิศ — คลิกเพื่อเปิดแผง · agents สั่งงาน plugin เหล่านี้ได้</div>
+       <button class="bigbtn" id="plgHub" style="margin-bottom:10px">🧩 เรียกดู Plugins Hub (ชุมชน) — กดติดตั้งทีเดียว</button>
        <input id="plgFilter" class="filterbox" placeholder="🔍 ค้นหา plugin…" style="margin-bottom:6px">
        <div id="plgList"></div>
        <div class="field" style="margin-top:12px"><label>📦 ติดตั้ง plugin จากลิงก์ GitHub (ง่ายสุด)</label>
@@ -2945,6 +2979,8 @@
            หรือวางโฟลเดอร์เองใน <code>plugins/</code> แล้วกด 🔄 · เขียน plugin เอง: docs/guide/plugins.md</div>
        </div>
        <button class="bigbtn" id="plgReload">🔄 โหลด plugins ใหม่</button>`;
+    modalCard.querySelector("#plgHub").onclick = () =>
+      popWindow("/pluginshub", "🧩 Plugins Hub", "pluginshub", { w: 880, h: 720 });
     const box = modalCard.querySelector("#plgList");
     if (!(r.plugins || []).length)
       box.innerHTML = `<div style="font-size:11.5px;color:var(--dim)">ยังไม่มี plugin</div>`;
@@ -3524,14 +3560,34 @@
         if (!box) return;
         const pending = (r.proposals || []).filter((p) => p.status === "pending");
         if (!pending.length) return;
-        box.innerHTML = `<div class="field"><label>💡 ข้อเสนอโปรเจคจากทีม — รอคุณตัดสิน</label></div>`;
+        // Approving stays one-at-a-time (each spins up a real project), but
+        // CLEARING is bulk: tick several and clear, or clear them all. Clearing
+        // is silent — it just takes them off your plate (no message to the team).
+        const selected = new Set();
+        box.innerHTML = `<div class="field" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <label style="margin:0">💡 ข้อเสนอโปรเจคจากทีม — รอคุณตัดสิน</label>
+            <span style="display:flex;gap:6px;flex:none">
+              <button id="prClearSel" class="danger" style="font:inherit;font-size:10.5px;padding:5px 9px;border-radius:8px;opacity:.45;pointer-events:none">${t("🧹 ล้างที่เลือก")}</button>
+              <button id="prClearAll" class="danger" style="font:inherit;font-size:10.5px;padding:5px 9px;border-radius:8px">${t("🧹 ล้างทั้งหมด")}</button>
+            </span>
+          </div>`;
+        const clearSelBtn = box.querySelector("#prClearSel");
+        const syncSelBtn = () => {
+          const n = selected.size;
+          clearSelBtn.style.opacity = n ? "1" : ".45";
+          clearSelBtn.style.pointerEvents = n ? "auto" : "none";
+          clearSelBtn.textContent = n ? `${t("🧹 ล้างที่เลือก")} (${n})` : t("🧹 ล้างที่เลือก");
+        };
         for (const p of pending) {
           const card = document.createElement("div");
           card.className = "arow";
           card.style.cssText = "cursor:default;display:block;padding:9px 11px";
           card.innerHTML =
             `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-               <b style="font-size:12.5px">💡 ${p.name.replace(/</g, "&lt;")}</b>
+               <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;flex:1;min-width:0">
+                 <input type="checkbox" class="prChk" style="margin-top:2px;cursor:pointer;flex:none">
+                 <b style="font-size:12.5px">💡 ${p.name.replace(/</g, "&lt;")}</b>
+               </label>
                <span style="display:flex;gap:6px;flex:none">
                  <span class="winbtn" title="อนุมัติ — สร้างโปรเจคให้ทีมทำเลย">✅</span>
                  <span class="winbtn hide" title="ปฏิเสธ">✕</span>
@@ -3547,8 +3603,23 @@
             .then(() => { addChip("✅ อนุมัติแล้ว — Director กำลังจัดทีม"); openOps("jobs"); });
           b[1].onclick = () => api("/proposals/respond", { id: p.id, decision: "reject", message: msgOf() })
             .then(() => { addChip("ส่งคำตอบให้ทีมแล้ว"); openOps("jobs"); });
+          const chk = card.querySelector(".prChk");
+          chk.onchange = () => { chk.checked ? selected.add(p.id) : selected.delete(p.id); syncSelBtn(); };
           box.appendChild(card);
         }
+        clearSelBtn.onclick = async () => {
+          if (!selected.size) return;
+          if (!await confirmDanger(t("ลบ"),
+              t("ล้างข้อเสนอที่เลือกทิ้ง? ข้อเสนอจะหายไปจากรายการ (ไม่ส่งข้อความถึงทีม)"), t("🧹 ล้างที่เลือก"))) return;
+          await api("/proposals/dismiss", { ids: [...selected] });
+          addChip(t("🧹 ล้างข้อเสนอที่เลือกแล้ว")); openOps("jobs");
+        };
+        box.querySelector("#prClearAll").onclick = async () => {
+          if (!await confirmDanger(t("ลบ"),
+              t("ล้างข้อเสนอทั้งหมดทิ้ง? ทุกข้อเสนอจะหายไปจากรายการ (ไม่ส่งข้อความถึงทีม)"), t("🧹 ล้างทั้งหมด"))) return;
+          await api("/proposals/dismiss", { all: true });
+          addChip(t("🧹 ล้างข้อเสนอทั้งหมดแล้ว")); openOps("jobs");
+        };
       });
       const sel = modalCard.querySelector("#jAgent");
       for (const aid of Object.keys(ROSTER).filter((x) => x !== "ceo")) {
@@ -4090,6 +4161,39 @@
       body: JSON.stringify(body),
     });
     try { return await r.json(); } catch { return {}; }
+  }
+
+  // A deliberate "are you sure?" gate for destructive actions (deleting a role,
+  // skill, agent…). Deleting should feel like a BIG deal — so this floats a
+  // modal ABOVE everything that you must confirm; Esc / cancel backs out.
+  // Returns a Promise<boolean>.
+  function confirmDanger(title, body, confirmLabel) {
+    return new Promise((resolve) => {
+      const ov = document.createElement("div");
+      ov.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;" +
+        "align-items:center;justify-content:center;background:rgba(2,6,14,0.55);" +
+        "backdrop-filter:blur(2px);font:inherit";
+      ov.innerHTML =
+        `<div style="width:min(360px,86vw);background:#0e1626;border:1px solid #2a3a55;` +
+        `border-radius:14px;padding:18px 18px 15px;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+           <div style="font-size:14px;font-weight:700;color:#ff7a6b;margin-bottom:6px">⚠ ${title}</div>
+           <div style="font-size:12px;color:#aebbd0;line-height:1.6;margin-bottom:15px">${body || ""}</div>
+           <div style="display:flex;gap:9px;justify-content:flex-end">
+             <button class="cdNo" style="font:inherit;font-size:12px;padding:8px 15px;border-radius:9px;
+               border:1px solid #2a3a55;background:transparent;color:#cdd8ea;cursor:pointer">${t("ยกเลิก")}</button>
+             <button class="cdYes" style="font:inherit;font-size:12px;padding:8px 16px;border-radius:9px;
+               border:1px solid #d9483b;background:#c2362a;color:#fff;font-weight:700;cursor:pointer">${confirmLabel || t("ลบ")}</button>
+           </div>
+         </div>`;
+      const close = (val) => { window.removeEventListener("keydown", onKey); ov.remove(); resolve(val); };
+      const onKey = (e) => { if (e.key === "Escape") close(false); if (e.key === "Enter") close(true); };
+      ov.querySelector(".cdNo").onclick = () => close(false);
+      ov.querySelector(".cdYes").onclick = () => close(true);
+      ov.onclick = (e) => { if (e.target === ov) close(false); };
+      window.addEventListener("keydown", onKey);
+      document.body.appendChild(ov);
+      ov.querySelector(".cdYes").focus();
+    });
   }
 
   // Sub-agent (ghost) events: parent's face, spectral naming — never a rail
