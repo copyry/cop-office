@@ -157,6 +157,16 @@ function wsConnect(host, path, hooks) {
   return { send: (s) => sendRaw(s, 1), close: () => { try { sock.destroy(); } catch {} } };
 }
 
+// Make run-on numbered/lettered lists readable before they go out to a channel:
+// drop a newline before any (1)/(2)/(a)/(b) marker that's been jammed onto the
+// same line as other text (or onto the previous marker), so each item lands on
+// its own line in Telegram/Discord/LINE too.
+function breakInlineLists(text) {
+  return String(text)
+    .replace(/(\((?:\d+|[a-zA-Z])\))(?=\((?:\d+|[a-zA-Z])\))/g, "$1\n")
+    .replace(/(\S)[ \t]+(\((?:\d+|[a-zA-Z])\)(?=\s|$))/g, "$1\n$2");
+}
+
 // ---- connectors --------------------------------------------------------------
 module.exports = function initChannels(ctx) {
   // ctx: getConfig() → reg.channels, onMessage(channel, from, text, reply), log(s)
@@ -425,7 +435,7 @@ module.exports = function initChannels(ctx) {
   // known target — so a conversation held at the CEO seat in the app also
   // mirrors to Telegram/Discord/LINE. No-op for a channel without a target.
   function relay(text) {
-    const t = String(text);
+    const t = breakInlineLists(String(text));
     if (!t.trim()) return;
     const tg = (ctx.getConfig().telegram) || {};
     if (state.telegram === "on" && tg.token && tg.chat) sendTelegram(tg.token, tg.chat, t);

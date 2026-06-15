@@ -1272,7 +1272,19 @@
     return d.toDateString() === now.toDateString()
       ? t : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + t;
   }
+  // Make run-on numbered/lettered lists readable: drop a newline before any
+  // (1)/(2)/(a)/(b) marker that's jammed onto the same line as other text (or
+  // onto the previous marker), so each item lands on its own line. The .msg
+  // bubble is white-space: pre-wrap, so the inserted \n renders as a break.
+  function breakInlineLists(text) {
+    return String(text)
+      // back-to-back markers: (a)(b)(c) → one per line
+      .replace(/(\((?:\d+|[a-zA-Z])\))(?=\((?:\d+|[a-zA-Z])\))/g, "$1\n")
+      // a marker glued after other text on the same line
+      .replace(/(\S)[ \t]+(\((?:\d+|[a-zA-Z])\)(?=\s|$))/g, "$1\n$2");
+  }
   function addMsg(cls, who, text, ts) {
+    text = breakInlineLists(text);
     const d = document.createElement("div");
     d.className = "msg " + cls;
     if (who) {
