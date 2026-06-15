@@ -2680,6 +2680,70 @@ function requestRestart() {
   return { ok: true, status: "triggered" };
 }
 
+// ---------------------------------------------------------------- provider probe
+// Helpers for POST /providers/test — a connectivity check only (phase 1), NOT
+// agent execution routing. Zero-dep GET over http/https to a provider's /models.
+const trimSlash = (s) => String(s || "").replace(/\/+$/, "");
+
+// Pull model ids out of an OpenAI-style ({data:[{id}]}) or Gemini-style
+// ({models:[{name}]}) /models response.
+function extractModelIds(json) {
+  if (!json || typeof json !== "object") return [];
+  if (Array.isArray(json.data)) return json.data.map((m) => m && m.id).filter(Boolean);
+  if (Array.isArray(json.models)) return json.models.map((m) => m && (m.name || m.id)).filter(Boolean);
+  return [];
+}
+
+// Resolve which URL+headers a /providers/test should hit. Returns { url, headers }
+// to probe, { skip:{...} } for a non-HTTP provider (claude-code), or { error }.
+function resolveProbeTarget(providerId) {
+  const cfg = providers.normalizeConfig(reg.providers);
+  const id = providerId || cfg.active;
+  const keys = reg.apiKeys || {};
+  const c = providers.customById(cfg.custom, id);
+  if (c) {
+    if (!c.baseUrl) return { error: "custom provider has no baseUrl" };
+    return { url: trimSlash(c.baseUrl) + "/models",
+      headers: c.apiKey ? { authorization: "Bearer " + c.apiKey } : {} };
+  }
+  if (id === "claude-code")
+    return { skip: { skipped: true, note: "local Claude Code runtime — no HTTP endpoint to probe" } };
+  if (id === "openai") {
+    const k = keys.OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    if (!k) return { error: "no OPENAI_API_KEY configured" };
+    return { url: "https://api.openai.com/v1/models", headers: { authorization: "Bearer " + k } };
+  }
+  if (id === "anthropic") {
+    const k = keys.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+    if (!k) return { error: "no ANTHROPIC_API_KEY configured" };
+    return { url: "https://api.anthropic.com/v1/models",
+      headers: { "x-api-key": k, "anthropic-version": "2023-06-01" } };
+  }
+  if (id === "gemini") {
+    const k = keys.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!k) return { error: "no GEMINI_API_KEY configured" };
+    return { url: "https://generativelanguage.googleapis.com/v1beta/models?key=" + encodeURIComponent(k),
+      headers: {} };
+  }
+  return { error: "unknown provider: " + id };
+}
+
+function httpGetJson(urlStr, headers, timeoutMs, cb) {
+  let u;
+  try { u = new URL(urlStr); } catch (e) { return cb(e); }
+  const mod = u.protocol === "http:" ? require("http") : require("https");
+  const r = mod.request({ method: "GET", hostname: u.hostname,
+    port: u.port || (u.protocol === "http:" ? 80 : 443),
+    path: u.pathname + u.search, headers: headers || {} }, (res) => {
+    let out = "";
+    res.on("data", (c) => (out += c));
+    res.on("end", () => { let j = null; try { j = JSON.parse(out); } catch {} cb(null, res.statusCode, j, out); });
+  });
+  r.setTimeout(timeoutMs || 6000, () => r.destroy(new Error("timeout")));
+  r.on("error", (e) => cb(e));
+  r.end();
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && (req.url.split("?")[0] === "/" || req.url.split("?")[0] === "/index.html")) {
     res.writeHead(200, {
@@ -2921,50 +2985,120 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(reg));
 
   } else if (req.method === "GET" && req.url.split("?")[0] === "/providers") {
-    // LLM provider catalog + the owner's current selection + per-provider
-    // readiness (key present?). Phase 1: descriptive only — no run is routed by
-    // this. Carries booleans for availability, never the key values.
+    // LLM provider catalog + custom endpoints + the owner's selection + per-
+    // provider readiness. Phase 1: descriptive only — no run is routed by this.
+    // Custom apiKeys are masked to a `hasKey` boolean; never the key value.
     reg.providers = providers.normalizeConfig(reg.providers);
     res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({
       catalog: providers.catalog(),
-      config: reg.providers,
+      config: {
+        active: reg.providers.active,
+        models: reg.providers.models,
+        custom: providers.publicCustom(reg.providers.custom),
+      },
       active: providers.resolveActive(reg.providers),
-      availability: providers.availability(reg.apiKeys, process.env),
+      availability: providers.availability(reg.apiKeys, process.env, reg.providers.custom),
     }));
 
   } else if (req.method === "POST" && req.url.split("?")[0] === "/providers") {
-    // Set the active provider and/or a provider's chosen model. Validated, then
-    // persisted to registry.json. This ONLY records the choice — it does not
-    // change how agents execute (Claude Code remains the runtime in phase 1).
+    // Records the owner's provider choices — active provider, a built-in's
+    // model, and full CRUD over custom OpenAI-compatible endpoints. Validated,
+    // then persisted. It ONLY records config; it does not change how agents
+    // execute (Claude Code remains the runtime in phase 1).
     readBody(req, (body) => {
       try {
-        const { active, provider, model } = JSON.parse(body || "{}");
+        const b = JSON.parse(body || "{}");
         const cfg = providers.normalizeConfig(reg.providers);
-        // Which provider does `model` apply to? explicit `provider`, else the
-        // one being activated, else the currently active one.
-        const target = provider || active || cfg.active;
-        if (active !== undefined) {
-          const v = providers.validate(active);
-          if (!v.ok) throw new Error(v.error);
-          cfg.active = active;
+
+        // -- custom endpoint CRUD (process before active/model so a freshly
+        //    added endpoint can be activated in the same request) ------------
+        if (b.addCustom) {
+          if (cfg.custom.length >= providers.MAX_CUSTOM)
+            throw new Error("custom provider limit reached (" + providers.MAX_CUSTOM + ")");
+          const id = providers.makeCustomId(b.addCustom.label, cfg.custom.map((c) => c.id));
+          const entry = providers.sanitizeCustomEntry(b.addCustom, id);
+          if (!entry) throw new Error("invalid custom provider (baseUrl must be a http(s) URL)");
+          cfg.custom.push(entry);
+          b._newId = id;
         }
-        if (model !== undefined) {
-          const v = providers.validate(target, model);
-          if (!v.ok) throw new Error(v.error);
-          cfg.models[target] = model;
+        if (b.editCustom) {
+          const cur = providers.customById(cfg.custom, b.editCustom.id);
+          if (!cur) throw new Error("unknown custom provider: " + b.editCustom.id);
+          // Merge: omitted fields keep their current value (so editing a label
+          // never wipes the stored apiKey).
+          const merged = { ...cur, ...b.editCustom };
+          if (b.editCustom.baseUrl !== undefined && !providers.validBaseUrl(merged.baseUrl))
+            throw new Error("invalid baseUrl (must be a http(s) URL)");
+          const entry = providers.sanitizeCustomEntry(merged, cur.id);
+          if (!entry) throw new Error("invalid custom provider after edit");
+          cfg.custom = cfg.custom.map((c) => (c.id === cur.id ? entry : c));
         }
+        if (b.deleteCustom) {
+          cfg.custom = cfg.custom.filter((c) => c.id !== b.deleteCustom);
+        }
+        if (Array.isArray(b.reorderCustom)) {
+          const pos = new Map(b.reorderCustom.map((id, i) => [id, i]));
+          cfg.custom.sort((a, c) =>
+            (pos.has(a.id) ? pos.get(a.id) : 1e9) - (pos.has(c.id) ? pos.get(c.id) : 1e9));
+        }
+
+        // -- active provider + model ---------------------------------------
+        const target = b.provider || b.active || cfg.active;
+        if (b.active !== undefined) {
+          const v = providers.validate(b.active, undefined, cfg.custom);
+          if (!v.ok) throw new Error(v.error);
+          cfg.active = b.active;
+        }
+        if (b.model !== undefined) {
+          const v = providers.validate(target, b.model, cfg.custom);
+          if (!v.ok) throw new Error(v.error);
+          // A built-in's model lives in the models map; a custom provider's
+          // model lives on its own entry.
+          const ce = providers.customById(cfg.custom, target);
+          if (ce) ce.model = String(b.model).slice(0, 80);
+          else cfg.models[target] = b.model;
+        }
+
         reg.providers = providers.normalizeConfig(cfg);
         saveReg();
         broadcast({ type: "providers.changed", agent: "main",
           active: reg.providers.active }, false);
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, config: reg.providers,
+        res.end(JSON.stringify({ ok: true,
+          newId: b._newId,
+          config: { active: reg.providers.active, models: reg.providers.models,
+            custom: providers.publicCustom(reg.providers.custom) },
           active: providers.resolveActive(reg.providers) }));
       } catch (e) {
         res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
       }
+    });
+
+  } else if (req.method === "POST" && req.url.split("?")[0] === "/providers/test") {
+    // Connectivity check (NOT agent routing → still phase 1): probe a provider's
+    // /models endpoint and report whether it answered + the models it returned.
+    readBody(req, (body) => {
+      let providerId;
+      try { providerId = JSON.parse(body || "{}").providerId; } catch {}
+      reg.providers = providers.normalizeConfig(reg.providers);
+      const target = resolveProbeTarget(providerId);
+      if (target.skip) {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        return res.end(JSON.stringify({ ok: true, providerId, ...target.skip }));
+      }
+      if (target.error) {
+        res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+        return res.end(JSON.stringify({ ok: false, providerId, error: target.error }));
+      }
+      httpGetJson(target.url, target.headers, 6000, (err, status, json) => {
+        const ok = !err && status >= 200 && status < 300;
+        const models = ok ? extractModelIds(json).slice(0, 50) : [];
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok, providerId, status: status || 0,
+          models, error: err ? String(err.message || err) : undefined }));
+      });
     });
 
   } else if (req.method === "GET" && req.url.startsWith("/recall")) {
@@ -2996,8 +3130,19 @@ const server = http.createServer((req, res) => {
         }
         const cur = reg.agents[id] || { skills: [], tools: [] };
         const px = p.persona || cur.persona || {};
+        // Per-agent LLM override (phase 1: stored only, not yet used to route a
+        // run). provider = a known provider id or "default" (use the office
+        // default); model is free-form. Omitted fields keep the current value.
+        let provider = cur.provider || "default";
+        if (p.provider !== undefined) {
+          if (!providers.isKnownProvider(p.provider, (reg.providers || {}).custom))
+            throw new Error("unknown provider: " + p.provider);
+          provider = p.provider || "default";
+        }
         reg.agents[id] = {
           ...cur,
+          provider,
+          model: String(p.model !== undefined ? p.model : (cur.model || "")).slice(0, 80),
           name: String(p.name || cur.name || id).slice(0, 40),
           role: String(p.role || cur.role || "Specialist").slice(0, 40),
           avatar: Math.min(Math.max(Number(p.avatar) || cur.avatar || 1, 1), 12),
