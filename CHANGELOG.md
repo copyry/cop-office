@@ -4,6 +4,15 @@ All notable changes to BagIdea Office. A **release** is a deliberate `VERSION`
 bump on `main` (see [RELEASING.md](RELEASING.md)) — that's what triggers the
 in-app 🔄 update banner. Versions follow [semver](https://semver.org).
 
+## [0.8.1] — Fix the cold-boot dark orb
+
+**Fixed**
+- **The floating chat-head orb no longer stays dark after a reboot.** On a cold boot
+  the shell paints the orb before the daemon's web server is up, so its logo 404'd and
+  a one-shot fallback left it dark until a manual `bagidea restart`. The orb now retries
+  loading its logo until the daemon answers (then drops the dark fallback) — so it comes
+  up correctly on its own.
+
 ## [0.8.0] — Swappable brains: run each agent on any model
 
 The big one. Every agent can now run on a different model/provider — keep the
