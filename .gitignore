@@ -84,3 +84,4 @@ daemon/proposals.json
 
 # daemon stdout/stderr log (runtime)
 daemon/daemon.log
+daemon/proxy.log
