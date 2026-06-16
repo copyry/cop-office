@@ -246,6 +246,18 @@ async function handle(req, res, provider, reg, raw) {
   }
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
+    // A "request too large for your TPM" 429 is NOT transient — the request is a fixed
+    // size and the limit is fixed, so claude's silent 429-retry loop spins forever and
+    // the user just sees a hang. Convert it to a clear, non-retryable (400) error.
+    if (r.status === 429 && /too large|tokens per min|\bTPM\b|request_too_large/i.test(txt)) {
+      const m = txt.match(/Limit\s+(\d+).*?Requested\s+(\d+)/i);
+      const detail = m ? ` (this request needs ~${m[2]} tokens, your limit is ${m[1]} tokens/min)` : "";
+      return errOut(400, "invalid_request_error",
+        `${provider}/${model}: request exceeds your account's rate limit${detail}. ` +
+        `Agent tasks bundle the full toolset + chat history, so they need a higher usage tier. ` +
+        `Raise this provider's tier (or add billing), start a fresh thread to shrink history, ` +
+        `or run this agent on a model with larger limits (Claude / GLM / DeepSeek).`);
+    }
     return errOut(r.status, "api_error", (txt || `upstream HTTP ${r.status}`).slice(0, 600));
   }
   let j;
