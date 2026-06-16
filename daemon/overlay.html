@@ -2180,6 +2180,8 @@
     const chStatus = await fetch("/channels/status").then((x) => x.json()).catch(() => ({}));
     const klist = modalCard.querySelector("#klist");
     if (!klist) return;  // tab switched away while loading
+    // Mask a secret so the user can recognise which key is set, without exposing it.
+    const maskKey = (v) => { v = String(v || ""); if (!v) return ""; return v.length <= 10 ? "•".repeat(v.length) : v.slice(0, 8) + "••••••" + v.slice(-4); };
     // ── MAIN keys: dedicated, labeled, feature-aware.
     const MAINS = [
       ["OPENAI_API_KEY", "OpenAI", "🎤 ถอดเสียง (Whisper) · 🖼 สร้างภาพ", "platform.openai.com/api-keys"],
@@ -2196,7 +2198,7 @@
       // set (✅ test / replace) and unset (paste + save). No ✕.
       card.innerHTML =
         `<div class="meta"><b>${has ? "✅" : "⚠️"} ${label} <span style="font-weight:400;color:var(--dim);font-size:10px">(${name})</span></b>
-          <span class="kstat">${has ? "ตั้งค่าแล้ว — " + feats : "ยังไม่ได้ตั้ง → " + feats + " จะใช้ไม่ได้ · ขอ key: " + where}</span></div>` +
+          <span class="kstat">${has ? "<code>" + maskKey((regAll.apiKeys || {})[name]) + "</code> · " + feats : "ยังไม่ได้ตั้ง → " + feats + " จะใช้ไม่ได้ · ขอ key: " + where}</span></div>` +
         (has
           ? `<div class="winbtn" data-a="test" title="ทดสอบว่า key ใช้งานได้จริง">🧪</div>
              <div class="winbtn" data-a="change" title="เปลี่ยน key ใหม่">🔄</div>`
@@ -2239,7 +2241,7 @@
       row.className = "arow";
       row.style.cursor = "default";
       row.innerHTML = `<div class="meta"><b>🔑 ${n}</b>` +
-        `<span>${"•".repeat(8)}${String(v).slice(-4)}</span></div>` +
+        `<span><code>${maskKey(v)}</code></span></div>` +
         `<div class="winbtn hide" title="ลบ key">✕</div>`;
       row.querySelector(".winbtn").onclick = () =>
         api("/registry/key", { name: n, remove: true }).then(() => openSettings("connect"));
@@ -2264,26 +2266,50 @@
       provbox.innerHTML = "";
       const pcAll = regAll.providerConfig || {};
       // Claude — special: subscription login OR API key, auto-detected. The default brain.
+      // Logged in → no key field (just a "switch to API key" button), so nobody pastes
+      // a key by accident and silently flips billing off their subscription.
       const cauth = await fetch("/claude/auth").then((x) => x.json()).catch(() => ({}));
       {
-        const statusText = cauth.viaKey ? "เชื่อมต่อแล้ว · ใช้ API key"
-          : cauth.loggedIn ? "เชื่อมต่อแล้ว · ใช้ subscription login"
-          : "ยังไม่ได้เชื่อมต่อ — Login หรือใส่ API key";
+        const ckey = (regAll.apiKeys || {}).ANTHROPIC_API_KEY;
         const cc = document.createElement("div");
         cc.className = "arow"; cc.style.cursor = "default";
+        let statusText, controls;
+        if (cauth.viaKey) {
+          statusText = "เชื่อมต่อแล้ว · ใช้ API key";
+          controls = `<span style="font-size:11px;color:var(--dim);margin-right:2px"><code>${maskKey(ckey)}</code></span>
+            <div class="winbtn" data-a="changekey" title="เปลี่ยน key">🔄</div>
+            <div class="winbtn hide" data-a="rmkey" title="ลบ key (กลับไปใช้ subscription)">✕</div>`;
+        } else if (cauth.loggedIn) {
+          statusText = "เชื่อมต่อแล้ว · ใช้ subscription login";
+          controls = `<div class="winbtn" data-a="usekey" title="เปลี่ยนไปใช้ API key">🔑</div>`;
+        } else {
+          statusText = "ยังไม่ได้เชื่อมต่อ — Login หรือใส่ API key";
+          controls = `<div class="winbtn" data-a="login" title="Login (subscription)">🔓</div>
+            <input type="password" placeholder="หรือวาง API key…" autocomplete="new-password" style="flex:0 0 120px;margin:0">
+            <div class="winbtn" data-a="savekey" title="ใช้ API key">💾</div>`;
+        }
         cc.innerHTML = `<div class="meta"><b>${cauth.connected ? "✅" : "⚪"} Claude · Anthropic</b>
-            <span class="pstat" style="color:${cauth.connected ? "#4ade80" : "var(--dim)"}">${statusText}</span></div>` +
-          `<div class="winbtn" data-a="login" title="Login (subscription)">🔓</div>
-           <input type="password" placeholder="หรือวาง API key…" autocomplete="new-password" style="flex:0 0 120px;margin:0">
-           <div class="winbtn" data-a="savekey" title="ใช้ API key">💾</div>`;
-        cc.querySelector('[data-a="login"]').onclick = async () => {
-          await api("/claude/login", {});
-          cc.querySelector(".pstat").textContent = "เปิดเทอร์มินัลให้ login แล้ว — ทำตามขั้นตอนในหน้าต่างนั้น แล้วกลับมากด 🔄";
+            <span class="pstat" style="color:${cauth.connected ? "#4ade80" : "var(--dim)"}">${statusText}</span></div>` + controls;
+        const saveKey = (v) => { if (v) api("/registry/key", { name: "ANTHROPIC_API_KEY", value: v }).then(() => openSettings("connect")); };
+        const revealKeyInput = () => {
+          const meta = cc.querySelector(".meta"); cc.innerHTML = ""; cc.appendChild(meta);
+          const inp = document.createElement("input");
+          inp.type = "password"; inp.placeholder = "วาง API key…"; inp.autocomplete = "new-password"; inp.style.cssText = "flex:0 0 120px;margin:0";
+          const ok = document.createElement("div"); ok.className = "winbtn"; ok.textContent = "💾"; ok.title = "ใช้ API key";
+          ok.onclick = () => saveKey(inp.value.trim());
+          cc.append(inp, ok); inp.focus();
         };
-        cc.querySelector('[data-a="savekey"]').onclick = () => {
-          const v = cc.querySelector("input").value.trim();
-          if (v) api("/registry/key", { name: "ANTHROPIC_API_KEY", value: v }).then(() => openSettings("connect"));
-        };
+        cc.querySelectorAll(".winbtn").forEach((btn) => {
+          const act = btn.dataset.a;
+          if (act === "login") btn.onclick = async () => {
+            await api("/claude/login", {});
+            cc.querySelector(".pstat").textContent = "เปิดเทอร์มินัลให้ login แล้ว — ทำตามขั้นตอนในหน้าต่างนั้น แล้วกลับมากด 🔄";
+          };
+          else if (act === "savekey") btn.onclick = () => saveKey(cc.querySelector("input").value.trim());
+          else if (act === "usekey" || act === "changekey") btn.onclick = revealKeyInput;
+          else if (act === "rmkey") btn.onclick = () =>
+            api("/registry/key", { name: "ANTHROPIC_API_KEY", remove: true }).then(() => openSettings("connect"));
+        });
         provbox.appendChild(cc);
       }
       for (const [pid, label, where, viaProxy] of PROV) {
