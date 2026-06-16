@@ -2669,6 +2669,9 @@ const server = http.createServer((req, res) => {
           voice: String(p.voice !== undefined ? p.voice : cur.voice || "").slice(0, 20),
           skills: Array.isArray(p.skills) ? p.skills : cur.skills || [],
           tools: Array.isArray(p.tools) ? p.tools : cur.tools || [],
+          // 🧠 swappable brain: which backend/model this agent runs on (default Claude).
+          provider: providers.PROVIDERS[p.provider] ? p.provider : (cur.provider || "claude"),
+          model: String(p.model !== undefined ? p.model : (cur.model || "")).slice(0, 60),
         };
         saveReg();
         pushRoster();
@@ -3117,6 +3120,30 @@ const server = http.createServer((req, res) => {
         saveReg();
         pushRoster();   // feature gates flip live in every client
         res.writeHead(200); res.end("ok");
+      } catch (e) { res.writeHead(400); res.end(String(e.message)); }
+    });
+
+  } else if (req.method === "POST" && req.url === "/registry/provider") {
+    // 🧠 Swappable-brain credentials: per-provider token / baseUrl / model
+    // overrides (glm/deepseek/qwen/minimax/litellm…). Values live only in
+    // registry.json + the agent's spawn env — never sent to Anthropic.
+    readBody(req, (body) => {
+      try {
+        const { provider, token, baseUrl, model, remove } = JSON.parse(body);
+        if (!provider) throw new Error("provider required");
+        reg.providerConfig = reg.providerConfig || {};
+        if (remove) {
+          delete reg.providerConfig[provider];
+        } else {
+          const c = reg.providerConfig[provider] || {};
+          if (token !== undefined) c.token = String(token).slice(0, 400);
+          if (baseUrl !== undefined) c.baseUrl = String(baseUrl).slice(0, 300);
+          if (model !== undefined) c.model = String(model).slice(0, 60);
+          reg.providerConfig[provider] = c;
+        }
+        saveReg();
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
       } catch (e) { res.writeHead(400); res.end(String(e.message)); }
     });
 
