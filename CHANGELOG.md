@@ -58,6 +58,69 @@ in-app 🔄 update banner. Versions follow [semver](https://semver.org).
   overlay/popup chat webviews (a standard Edit menu is installed at startup);
   previously paste silently did nothing on macOS.
 
+## [0.7.25] — Remove the custom-character experiment
+
+**Removed**
+- **The custom (color-tinted) character system** (added in 0.7.23–0.7.24) — it
+  didn't work well in practice, so it's gone: avatars are the 12 polished NPC
+  designs again. Any agent that was set to a custom look is automatically moved
+  back to a normal NPC.
+
+## [0.7.24] — Custom characters: live preview, matching faces & smoother walk
+
+**Fixed**
+- **Custom-character colors now show everywhere**, not just on the wallpaper — the
+  agents rail, the companion beside the chat, and nameplates all render the same
+  tinted character (the overlay composites it just like the office does).
+- **Smoother walk** for custom characters — no more jittery stride (their idle art
+  keeps a calm cadence with a gentle step-bob instead of flickering).
+
+**Added**
+- **A live preview** in the avatar editor — see your custom character update as you
+  drag the skin / hair / outfit colors (or roll 🎲), before you save.
+
+## [0.7.23] — Design-your-own characters (custom colors)
+
+**Added**
+- **A 🎨 Custom character** in the avatar picker. Pick your own **skin / hair /
+  outfit** colors (or hit 🎲 for a random mix) and that agent renders as a unique
+  tinted character — unlimited looks, no new art needed. Each agent remembers its
+  colors, and the picker speaks all 14 languages.
+
+## [0.7.22] — Tools Hub, Plugins Hub & Workflow Builder speak every language
+
+**Changed**
+- **The pop-out windows now translate into all 14 languages**, not just Thai/
+  English. The Tools Hub, Plugins Hub and Workflow Builder auto-translate to your
+  office language (and ship pre-translated, so they show instantly) — they used to
+  fall back to English for everything except Thai.
+
+## [0.7.21] — More of the UI ships pre-translated
+
+**Changed**
+- **Newer screens now ship pre-translated** in all 14 languages — the Plugins Hub,
+  the display menu, the confirm dialogs and more show in your language instantly,
+  instead of waiting for on-the-fly translation the first time.
+
+## [0.7.20] — Workflow Builder polish & friendlier scrolling
+
+**Fixed**
+- **The last Thai bit in the Workflow Builder** (the Run / Save-as-Skill help line)
+  now translates properly in English offices.
+- **No more white resize-grip / scrollbar** on workflow node boxes — the text area
+  scrolls with the office’s slim themed scrollbar instead.
+
+**Changed**
+- **Scrolling over node text scrolls the text**, not the canvas zoom. (Zoom still
+  works over empty canvas.)
+- **Right-click anywhere on the workflow canvas** pops the ＋ Node menu at your
+  cursor — works on examples too (adding a node + Save just makes an editable copy).
+- **No native browser right-click menu** in pop-out windows anymore (Plugins,
+  Workflow, Tools/Plugins Hub…). Pages that want their own menu still have one;
+  the browser’s default just doesn’t butt in.
+- **The agents rail scrolls sideways with the mouse wheel** — no more wrestling the
+  thin scrollbar.
+
 ## [0.7.19] — Workflow Builder: English-first & right-click to add a node
 
 **Changed**

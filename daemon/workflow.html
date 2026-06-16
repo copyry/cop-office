@@ -10,8 +10,10 @@
   html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
     font:13px/1.5 -apple-system,Segoe UI,Roboto,"Noto Sans Thai",sans-serif; overflow:hidden; user-select:none; }
   ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-track { background:transparent; }
   ::-webkit-scrollbar-thumb { background:rgba(94,200,255,.35); border-radius:8px; }
   ::-webkit-scrollbar-thumb:hover { background:rgba(94,200,255,.55); }
+  ::-webkit-scrollbar-corner { background:transparent; }
   #bar { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line);
     background:#0c1322; z-index:6; flex-wrap:wrap; }
   #bar input#name { background:#0a1020; border:1px solid var(--line); color:var(--text); border-radius:8px;
@@ -54,8 +56,9 @@
     border-radius:6px; font-size:11px; padding:2px 4px; }
   .node .head .x { margin-left:auto; cursor:pointer; color:var(--dim); padding:0 4px; }
   .node .head .x:hover { color:#ff7b7b; }
-  .node textarea { width:100%; border:0; background:transparent; color:var(--text); resize:vertical;
-    min-height:50px; padding:9px; font:13px/1.45 inherit; outline:none; user-select:text; }
+  .node textarea { width:100%; border:0; background:transparent; color:var(--text); resize:none;
+    min-height:50px; max-height:240px; padding:9px; font:13px/1.45 inherit; outline:none; user-select:text;
+    overflow:auto; }
   .port { position:absolute; left:50%; transform:translateX(-50%); width:14px; height:14px; border-radius:50%;
     background:#0a1020; border:2px solid var(--accent); cursor:crosshair; z-index:2; }
   .port:hover { background:var(--accent); }
@@ -112,9 +115,11 @@
       <div class="muted" data-i18h="“<b>รันเลย</b>” = ให้ทีมทำตาม workflow นี้เดี๋ยวนี้ แล้วรายงานผล · “<b>สร้างเป็น Skill</b>” = บันทึกเป็นสกิลที่นำไปติ๊กให้ agent ในหน้าตั้งค่า เพื่อเรียกใช้ซ้ำเมื่อไหร่ก็ได้ (หรือพิมพ์สั่ง agent ให้ “รัน &lt;ชื่อ workflow&gt;”)">“<b>รันเลย</b>” = ให้ทีมทำตาม workflow นี้เดี๋ยวนี้ แล้วรายงานผล · “<b>สร้างเป็น Skill</b>” = บันทึกเป็นสกิลที่นำไปติ๊กให้ agent ในหน้าตั้งค่า เพื่อเรียกใช้ซ้ำเมื่อไหร่ก็ได้ (หรือพิมพ์สั่ง agent ให้ “รัน &lt;ชื่อ workflow&gt;”)</div>
     </div>
   </div>
+<script src="/winlang.js"></script>
 <script>
-  // ---- i18n: Thai is the source; non-Thai offices show English (other langs
-  //      fall back to English). Applied after we learn the office language.
+  // ---- i18n: Thai is the source. English offices use the TR map; OTHER
+  //      languages auto-translate via the daemon (/i18n, shared with the main
+  //      office) and fall back to English, then Thai, until a translation lands.
   let LANG = "th";
   const TR = {
     "Workflow ใหม่":"New workflow", "ชื่อ workflow…":"Workflow name…",
@@ -129,7 +134,7 @@
       "📄 This is an <b>example</b> (read-only) — press 💾 Save to make an editable copy",
     "กด “วิเคราะห์” แล้ว Director จะอ่าน workflow (รวมการแตกแขนง/รวม) แล้วบอกว่าต้องใช้ skill/tool/permission อะไร และมอบหมายให้ใคร":
       "Press “Analyze” and the Director reads the workflow (branches & merges) and tells you which skills/tools/permissions it needs and who to assign.",
-    "“<b>รันเลย</b>” = ให้ทีมทำตาม workflow นี้เดี๋ยวนี้ แล้วรายงานผล · “<b>สร้างเป็น Skill</b>” = บันทึกเป็นสกิลที่นำไปติ๊กให้ agent ในหน้าตั้งค่า เพื่อเรียกใช้ซ้ำเมื่อไหร่ก็ได้ (หรือพิมพ์สั่ง agent ให้ “รัน &lt;ชื่อ workflow&gt;”)":
+    "“<b>รันเลย</b>” = ให้ทีมทำตาม workflow นี้เดี๋ยวนี้ แล้วรายงานผล · “<b>สร้างเป็น Skill</b>” = บันทึกเป็นสกิลที่นำไปติ๊กให้ agent ในหน้าตั้งค่า เพื่อเรียกใช้ซ้ำเมื่อไหร่ก็ได้ (หรือพิมพ์สั่ง agent ให้ “รัน <ชื่อ workflow>”)":
       "“<b>Run now</b>” = the team does this workflow now and reports back · “<b>Save as Skill</b>” = save it as a skill you assign to an agent in Settings and reuse anytime (or just tell an agent to “run &lt;workflow name&gt;”).",
     "เพิ่ม node ก่อนนะ":"Add a node first","⏳ Director กำลังวิเคราะห์…":"⏳ Director is analyzing…",
     "วิเคราะห์ไม่สำเร็จ ลองใหม่":"Analysis failed — try again","⏳ ทีมกำลังทำงานตาม workflow…":"⏳ The team is running the workflow…",
@@ -138,14 +143,28 @@
     "📂 เปิด…":"📂 Open…","ตัวอย่าง (อ่านอย่างเดียว)":"Examples (read-only)","ของฉัน":"Mine",
     "เมื่อสั่งให้เริ่ม…":"When started…","เมื่อสั่งให้เริ่ม":"When started","หาข่าว A":"Find news A","หาข่าว B":"Find news B","รวมแล้วเขียนสรุป":"Merge & summarize",
   };
-  function tr(s){ return LANG==="th" ? s : (TR[s] || s); }
+  let WL = null;  // WinLang instance for non-English langs (Thai → lang via /i18n)
+  // th → as-is · other langs → WinLang map first · English (and any gap) → TR.
+  function tr(s){
+    if (LANG==="th") return s;
+    if (WL && WL.map[s]!=null) return WL.map[s];
+    return TR[s] || s;
+  }
   function applyLang(){
     if (LANG==="th") return;
-    document.querySelectorAll("[data-i18n]").forEach(e=>{ const v=TR[e.getAttribute("data-i18n")]; if(v!=null) e.textContent=v; });
-    document.querySelectorAll("[data-i18h]").forEach(e=>{ const v=TR[e.getAttribute("data-i18h")]; if(v!=null) e.innerHTML=v; });
-    document.querySelectorAll("[data-ph]").forEach(e=>{ const v=TR[e.getAttribute("data-ph")]; if(v!=null) e.placeholder=v; });
+    document.querySelectorAll("[data-i18n]").forEach(e=>{ const v=tr(e.getAttribute("data-i18n")); if(v!=null) e.textContent=v; });
+    document.querySelectorAll("[data-i18h]").forEach(e=>{ const v=tr(e.getAttribute("data-i18h")); if(v!=null) e.innerHTML=v; });
+    document.querySelectorAll("[data-ph]").forEach(e=>{ const v=tr(e.getAttribute("data-ph")); if(v!=null) e.placeholder=v; });
   }
-  fetch("/registry").then(r=>r.json()).then(reg=>{ if((reg.lang||"th")!=="th"){ LANG="en"; applyLang(); renderTabs(); } }).catch(()=>{});
+  function rerenderAll(){ applyLang(); renderTabs(); if(active>=0){ clearCanvas(); nodes.forEach(renderNode); drawEdges(); } }
+  fetch("/registry").then(r=>r.json()).then(async reg=>{
+    const lang = reg.lang || "th";
+    if (lang === "th") return;
+    LANG = lang;
+    if (lang !== "en" && window.WinLang) WL = await WinLang.build(lang);
+    rerenderAll();
+    if (WL) WL.ensure(Object.keys(TR), rerenderAll);   // fill gaps via Gemini, re-render live
+  }).catch(()=>{});
 
   const TYPES = [["trigger","⚡ เริ่มเมื่อ"],["fetch","⬇ ดึงข้อมูล"],["action","⚙ ทำงาน"],
     ["decision","◆ ตัดสินใจ"],["output","📤 ส่งผล"],["note","📝 โน้ต"]];
@@ -291,7 +310,12 @@
     const up = () => { vp.classList.remove("panning"); document.removeEventListener("mousemove",move); document.removeEventListener("mouseup",up); };
     document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
   });
-  vp.addEventListener("wheel", (e) => { e.preventDefault();
+  vp.addEventListener("wheel", (e) => {
+    // Wheeling inside a node's text that can actually scroll = read the text,
+    // NOT zoom the canvas. Only zoom over empty canvas / non-scrolling text.
+    const ta = e.target.closest("textarea");
+    if (ta && ta.scrollHeight > ta.clientHeight + 1) return;
+    e.preventDefault();
     const r = vp.getBoundingClientRect(), mx = e.clientX-r.left, my = e.clientY-r.top;
     const f = e.deltaY<0?1.1:0.9, nz = Math.min(2, Math.max(0.3, zoom*f));
     pan.x = mx-(mx-pan.x)*(nz/zoom); pan.y = my-(my-pan.y)*(nz/zoom); zoom = nz; applyTransform();
@@ -367,10 +391,12 @@
     nodes.push(n); renderNode(n); drawEdges();
   }
   vp.addEventListener("contextmenu", (e) => {
-    if (e.target.closest(".node")) return;   // inside a node → keep the native edit menu
+    // Right-click ANYWHERE on the canvas → the ＋ Node menu at the cursor. Works
+    // on examples too: adding a node + Save just forks an editable copy (same as
+    // editing the text does). This is our own menu — the native browser menu is
+    // disabled app-wide for pop-out windows.
     e.preventDefault();
     closeNodeMenu();
-    if (isExample) return;                    // examples are read-only
     const wpos = screenToWorld(e.clientX, e.clientY);
     const m = document.createElement("div");
     m.id = "nodemenu";

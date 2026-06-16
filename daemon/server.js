@@ -427,6 +427,24 @@ if (!fs.existsSync(OFFICE_MD)) {
   } catch {}
 })();
 
+// 🧹 Retire the short-lived "custom character" experiment: any agent left on
+// avatar 0 (or with leftover tint colors) is moved back to a normal NPC sheet so
+// it renders properly. One-time, idempotent.
+(function dropCustomAvatars() {
+  let changed = false;
+  for (const id of Object.keys(reg.agents || {})) {
+    const a = reg.agents[id];
+    if (!a) continue;
+    if (!(a.avatar >= 1 && a.avatar <= 12)) {
+      let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) | 0;
+      a.avatar = (Math.abs(h) % 12) + 1;
+      changed = true;
+    }
+    if (a.skin || a.hair || a.suit) { delete a.skin; delete a.hair; delete a.suit; changed = true; }
+  }
+  if (changed) try { saveReg(); } catch {}
+})();
+
 // 🌐 Ship pre-translated UI caches: merge daemon/i18n-seed/<lang>.json into the
 // runtime cache (daemon/i18n/) on startup, so the UI shows in the chosen
 // language even with NO Gemini key. Runtime entries win (they may be newer or
@@ -2758,6 +2776,13 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     try { res.end(fs.readFileSync(path.join(__dirname, "win.html"))); }
     catch { res.end("<p>window frame unavailable</p>"); }
+
+  } else if (req.method === "GET" && req.url.split("?")[0] === "/winlang.js") {
+    // Shared auto-translate helper for pop-out windows (Tools/Plugins Hub,
+    // Workflow Builder): Thai source → office language via /i18n (cached + seeded).
+    res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    try { res.end(fs.readFileSync(path.join(__dirname, "winlang.js"))); }
+    catch { res.end("window.WinLang={build:async()=>({lang:'th',map:{},tr:s=>s,ensure:async()=>{}})};"); }
 
   } else if (req.method === "GET" && req.url.split("?")[0] === "/watch") {
     // Read-only live activity stream for an agent (opened as its own window) —

@@ -1181,6 +1181,13 @@
   const missionsEl = document.getElementById("missions");
   const permsEl = document.getElementById("perms");
   const railEl = document.getElementById("rail");
+  // Wheel over the agents rail scrolls it sideways — dragging the thin scrollbar
+  // is fiddly, so a normal mouse wheel pans the row left/right.
+  railEl.addEventListener("wheel", (e) => {
+    if (railEl.scrollWidth <= railEl.clientWidth) return;  // nothing overflowing
+    e.preventDefault();
+    railEl.scrollLeft += (e.deltaY !== 0 ? e.deltaY : e.deltaX);
+  }, { passive: false });
   const missions = {};
   const agents = {};   // id -> {state}
   let target = "ceo";   // open on the CEO seat (you) — orders flow to the Director

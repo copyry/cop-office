@@ -56,9 +56,17 @@
   if (q.get("resizable") !== "0") bar.addEventListener("dblclick", (e) => {
     if (!e.target.closest(".wbtn")) post("win-max");
   });
+  // No native browser right-click menu in our app windows. Pages that WANT a
+  // menu (e.g. the workflow canvas, or a plugin) build their own — those still
+  // work; this only suppresses the default browser menu (Reload/Save/Inspect…).
+  const noNativeMenu = (doc) => doc.addEventListener("contextmenu", (e) => {
+    if (!e.defaultPrevented) e.preventDefault();
+  });
+  noNativeMenu(document);
   const f = document.getElementById("f");
   f.src = src;
-  // Same-origin: give the embedded content the office's slim themed scrollbar.
+  // Same-origin: give the embedded content the office's slim themed scrollbar
+  // + the same no-native-menu rule.
   f.onload = () => {
     try {
       const d = f.contentDocument;
@@ -71,6 +79,7 @@
         "::-webkit-scrollbar-thumb{background:rgba(110,180,255,0.22);border-radius:6px}" +
         "::-webkit-scrollbar-thumb:hover{background:rgba(110,180,255,0.45)}";
       (d.head || d.documentElement).appendChild(st);
+      noNativeMenu(d);
     } catch {}
   };
 </script>
