@@ -2195,12 +2195,46 @@
     };
   }
 
-  // 🤖 AI PROVIDERS — pick the office's active "brain", set each built-in's
-  // model, and manage custom OpenAI-compatible endpoints (add/edit/delete +
-  // drag to reorder = fallback chain). Phase 1: config only — nothing routes a
-  // run on this yet. Renders into #provbox in the CONNECT tab; the overlay theme
-  // is fixed vanilla CSS so this matches the existing channel/key cards.
+  // 🤖 AI PROVIDERS — office-wide config: the active "brain", each built-in's
+  // model, and the custom OpenAI-compatible endpoints (add/edit/delete + drag to
+  // reorder = fallback chain). Phase 1: config only — nothing routes a run on it
+  // yet. This lives INSIDE the agent editor card (the ▸ "ตั้งค่ากลาง" panel),
+  // NOT in CONNECT — CONNECT is keys-only. Renders into #provbox; the overlay
+  // theme is fixed vanilla CSS so it matches the existing channel/key cards.
   let PROV_CACHE = null;  // last /providers payload — reused by the agent editor
+
+  // Connectivity probe → write ✅/❌ + found models into a status line. Shared by
+  // the central provider manager and the per-agent provider picker.
+  async function probeProvider(providerId, statEl) {
+    if (!statEl) return;
+    statEl.innerHTML = `<span style="color:var(--dim)">🧪 กำลังทดสอบ…</span>`;
+    const r = await api("/providers/test", { providerId });
+    if (r && r.skipped) { statEl.innerHTML = `<span style="color:var(--dim)">— ${r.note || "ไม่มี endpoint ให้ทดสอบ"}</span>`; return; }
+    if (r && r.ok) {
+      const ms = r.models || [];
+      statEl.innerHTML = `<span style="color:#4ade80">✅ ต่อติด${ms.length ? ` · เจอ ${ms.length} model: ` + ms.slice(0, 4).join(", ") + (ms.length > 4 ? "…" : "") : ""}</span>`;
+    } else {
+      statEl.innerHTML = `<span style="color:#ff6258">❌ ${(r && (r.error || (r.status ? "HTTP " + r.status : ""))) || "ทดสอบไม่สำเร็จ"}</span>`;
+    }
+  }
+
+  // Rebuild the per-agent provider <select> from PROV_CACHE, preserving the
+  // current pick (called after the central manager adds/removes a custom one).
+  function syncAgentProviderSelect() {
+    const sel = document.getElementById("eProvider");
+    if (!sel || !PROV_CACHE) return;
+    const keep = sel.value;
+    const all = [...(PROV_CACHE.catalog || []),
+      ...((PROV_CACHE.config && PROV_CACHE.config.custom) || []).map((c) => ({ id: c.id, label: c.label + " (custom)" }))];
+    sel.innerHTML = `<option value="default">⭐ ตามออฟฟิศ (default)</option>`;
+    for (const p of all) {
+      const o = document.createElement("option");
+      o.value = p.id; o.textContent = p.label;
+      sel.appendChild(o);
+    }
+    sel.value = all.some((p) => p.id === keep) ? keep : "default";
+  }
+
   async function renderProviders() {
     const box = document.getElementById("provbox");
     if (!box) return;
@@ -2223,18 +2257,7 @@
       await renderProviders();
       return r;
     };
-    // Connectivity probe → write ✅/❌ + found models into a status line.
-    const test = async (providerId, statEl) => {
-      statEl.innerHTML = `<span style="color:var(--dim)">🧪 กำลังทดสอบ…</span>`;
-      const r = await api("/providers/test", { providerId });
-      if (r && r.skipped) { statEl.innerHTML = `<span style="color:var(--dim)">— ${r.note || "ไม่มี endpoint ให้ทดสอบ"}</span>`; return; }
-      if (r && r.ok) {
-        const ms = r.models || [];
-        statEl.innerHTML = `<span style="color:#4ade80">✅ ต่อติด${ms.length ? ` · เจอ ${ms.length} model: ` + ms.slice(0, 4).join(", ") + (ms.length > 4 ? "…" : "") : ""}</span>`;
-      } else {
-        statEl.innerHTML = `<span style="color:#ff6258">❌ ${(r && (r.error || (r.status ? "HTTP " + r.status : ""))) || "ทดสอบไม่สำเร็จ"}</span>`;
-      }
-    };
+    const test = probeProvider;  // shared connectivity probe
     const cardEl = (activeEdge) => {
       const c = document.createElement("div");
       c.className = "field";
@@ -2343,6 +2366,8 @@
     addBtn.onclick = () => openCustomForm(null);
     box.appendChild(addBtn);
 
+    syncAgentProviderSelect();  // keep the per-agent picker's options in sync
+
     // Inline add/edit form for a custom endpoint. `cur`=null → add, else edit.
     function openCustomForm(cur) {
       const editing = !!cur;
@@ -2388,7 +2413,6 @@
     const chStatus = await fetch("/channels/status").then((x) => x.json()).catch(() => ({}));
     const klist = modalCard.querySelector("#klist");
     if (!klist) return;  // tab switched away while loading
-    renderProviders();  // 🤖 AI providers section (loads its own data async)
     // ── MAIN keys: dedicated, labeled, feature-aware.
     const MAINS = [
       ["OPENAI_API_KEY", "OpenAI", "🎤 ถอดเสียง (Whisper) · 🖼 สร้างภาพ", "platform.openai.com/api-keys"],
@@ -2581,8 +2605,6 @@
       bodyHtml = `
         <div class="field"><label>⭐ MAIN API KEYS — กุญแจหลักของโปรแกรม (ปลดล็อกฟีเจอร์เสียง · TTS · รูปภาพ · realtime)</label>
           <div id="mainkeys"></div></div>
-        <div class="field"><label>🤖 AI PROVIDERS — สมองของ agents · เลือกตัวหลัก + model · ต่อ endpoint เครื่องอื่นเองได้ (ลำดับ custom = ลำดับ fallback)</label>
-          <div id="provbox"><div style="font-size:11px;color:var(--dim)">กำลังโหลด…</div></div></div>
         <div class="field"><label>🔑 API KEYS เพิ่มเติม — ฉีดเข้า env ของ agent ทุกตัว (เช่น GEMINI2 ให้ agents ใช้แยกจาก key หลัก)</label>
           <div id="klist"></div>
           <div class="assistrow" style="margin-top:8px">
@@ -2892,11 +2914,15 @@
            <select id="eVoice" style="flex:1"></select>
            <button class="send" id="eVoicePlay" title="ฟังตัวอย่างเสียงนี้">▶</button>
          </div></div>
-       <div class="field"><label>🤖 AI MODEL — สมองของ agent นี้ (default = ใช้ provider หลักของออฟฟิศ · ตั้งใน ⚙ CONNECT)</label>
+       <div class="field"><label>🤖 AI MODEL — สมองของ agent นี้ (default = ใช้ provider หลักของออฟฟิศ)</label>
          <div class="assistrow">
-           <select id="eProvider" style="flex:0 0 44%"><option value="default">⭐ ตามออฟฟิศ (default)</option></select>
+           <select id="eProvider" style="flex:0 0 40%"><option value="default">⭐ ตามออฟฟิศ (default)</option></select>
            <input id="eModel" maxlength="80" placeholder="model (เว้นว่าง = ค่าเริ่มต้นของ provider)">
-         </div></div>
+           <button class="sparkle" id="eProvTest" title="ทดสอบการเชื่อมต่อ provider ที่เลือก">🧪</button>
+         </div>
+         <div id="eProvStat" style="font-size:10.5px;margin-top:4px;min-height:13px"></div>
+         <div id="provMgrToggle" style="font-size:11px;color:var(--accent);cursor:pointer;margin-top:6px;user-select:none">▸ จัดการผู้ให้บริการ &amp; custom endpoint (ตั้งค่ากลางทั้งออฟฟิศ)</div>
+         <div id="provbox" style="display:none;margin-top:8px"></div></div>
        <div class="field"><label>🎯 SKILLS</label><div class="checks" id="eSkills"></div></div>
        <div class="field"><label>🔧 TOOLS (ว่าง = ชุดอ่านอย่างเดียว Read/Glob/Grep)</label><div class="checks" id="eTools"></div></div>`;
     modalCard.innerHTML = hdr(isUser ? "👑 YOUR AVATAR" : (id ? "✏ EDIT AGENT" : "＋ HIRE AGENT")) +
@@ -3045,6 +3071,25 @@
         };
         const data = PROV_CACHE || await fetch("/providers").then((x) => x.json()).catch(() => null);
         if (data) { PROV_CACHE = data; fill(data); }
+        // 🧪 test the currently-selected provider (resolve "default" → office active)
+        const provStat = modalCard.querySelector("#eProvStat");
+        const testBtn = modalCard.querySelector("#eProvTest");
+        if (testBtn) testBtn.onclick = () => {
+          const pid = provSel.value === "default"
+            ? ((PROV_CACHE && PROV_CACHE.config && PROV_CACHE.config.active) || "claude-code")
+            : provSel.value;
+          probeProvider(pid, provStat);
+        };
+        // ▸ central provider manager (active/built-in models/custom CRUD) — global
+        // config, collapsed by default so the agent card stays focused.
+        const tog = modalCard.querySelector("#provMgrToggle");
+        const mgr = modalCard.querySelector("#provbox");
+        if (tog && mgr) tog.onclick = () => {
+          const open = mgr.style.display !== "none";
+          mgr.style.display = open ? "none" : "block";
+          tog.textContent = (open ? "▸" : "▾") + " จัดการผู้ให้บริการ & custom endpoint (ตั้งค่ากลางทั้งออฟฟิศ)";
+          if (!open && !mgr.dataset.loaded) { mgr.dataset.loaded = "1"; renderProviders(); }
+        };
       }
       modalCard.querySelector("#eTier").value = String(a.tier || (id === "main" ? 2 : 3));
       modalCard.querySelector("#ePrompt").value = a.prompt || "";
@@ -4577,12 +4622,13 @@
     }
     if (ev.type === "providers.changed") {
       // LLM provider config changed somewhere — drop the cache and live-refresh
-      // the AI Providers card if CONNECT is open and the owner isn't mid-typing
-      // in one of its own fields (e.g. editing a custom endpoint).
+      // the central manager if it's open inside the agent editor (and the owner
+      // isn't mid-typing in one of its fields, e.g. editing a custom endpoint).
       PROV_CACHE = null;
       const ae = document.activeElement || {};
       const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(ae.tagName) && modalCard.contains(ae);
-      if (modal.classList.contains("open") && document.getElementById("provbox") && !typing)
+      const mgr = document.getElementById("provbox");
+      if (modal.classList.contains("open") && mgr && mgr.dataset.loaded && !typing)
         renderProviders();
       return;
     }
