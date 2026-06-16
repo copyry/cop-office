@@ -480,6 +480,15 @@
     border-radius: 8px; color: var(--text);
   }
   .biglist { max-height: 320px; overflow-y: auto; }
+  /* themed combobox dropdown (model picker) — replaces the unstyleable native <datalist> */
+  .cbmenu { position: absolute; left: 0; right: 0; top: 100%; margin-top: 3px; z-index: 60;
+    max-height: 190px; overflow-y: auto; display: none;
+    background: #131b2d; border: 1px solid var(--line); border-radius: 9px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5); }
+  .cbmenu.open { display: block; }
+  .cbopt { padding: 8px 12px; font-size: 12px; cursor: pointer; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cbopt:hover { background: var(--accent); color: #fff; }
 
   /* 🎤 live dictation pill — pulses while the mic is hot, shows the words */
   #pttLive {
@@ -2812,7 +2821,10 @@
        </select></div>
        <div class="field"><label>🧠 สมอง (โมเดล/ผู้ให้บริการ) — ดีฟอลต์คือ Claude</label>
          <select id="eProvider"></select>
-         <input id="eModel" list="eModelList" maxlength="60" style="margin-top:6px" placeholder="โมเดล (เว้นว่าง = ดีฟอลต์ของผู้ให้บริการ)"><datalist id="eModelList"></datalist>
+         <div id="eModelWrap" style="position:relative;margin-top:6px">
+           <input id="eModel" autocomplete="off" maxlength="60" style="margin:0;width:100%" placeholder="โมเดล (เว้นว่าง = ดีฟอลต์ของผู้ให้บริการ)">
+           <div id="eModelMenu" class="cbmenu"></div>
+         </div>
          <div id="eProvWarn" style="display:none;margin-top:6px;font-size:11px">
            <span style="color:#ffb054">⚠ ยังไม่ได้เชื่อมต่อ provider นี้</span>
            <button class="send" id="eGoConnect" style="margin-left:6px">🔗 ไปหน้า CONNECT</button>
@@ -2985,36 +2997,51 @@
         gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
         openrouter: ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"], nvidia: ["meta/llama-3.3-70b-instruct"] };
       const BSET = new Set(BUILTIN.map((b) => b[0]).concat("litellm"));
-      const modelSel = modalCard.querySelector("#eModel");
+      const modelInput = modalCard.querySelector("#eModel");
+      const modelWrap = modalCard.querySelector("#eModelWrap");
+      const modelMenu = modalCard.querySelector("#eModelMenu");
       const warn = modalCard.querySelector("#eProvWarn");
       const goc = modalCard.querySelector("#eGoConnect");
       if (goc) goc.onclick = () => openSettings("connect");
       const saveBtn = modalCard.querySelector("#eSave");
       let pcAll = {};
+      let curModels = [];
       const buildProviderOptions = () => {
         const customs = Object.keys(pcAll).filter((id) => !BSET.has(id) && pcAll[id] && pcAll[id].label)
           .map((id) => [id, pcAll[id].label + " · custom"]);
         provSel.innerHTML = BUILTIN.concat(customs).map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
         provSel.value = a.provider || "claude";
       };
-      const renderModels = () => {
+      // Themed combobox: suggestions filtered by what's typed; click to pick, or type freely.
+      const showMenu = () => {
+        const f = modelInput.value.trim().toLowerCase();
+        const opts = curModels.filter(Boolean).filter((m) => !f || m.toLowerCase().includes(f));
+        modelMenu.innerHTML = opts.length
+          ? opts.map((m) => `<div class="cbopt">${String(m).replace(/</g, "&lt;")}</div>`).join("")
+          : `<div class="cbopt" style="opacity:.55;cursor:default">${tr("พิมพ์ชื่อโมเดลเองได้")}</div>`;
+        [...modelMenu.querySelectorAll(".cbopt")].forEach((o, i) => {
+          if (opts[i] != null) o.onmousedown = (e) => { e.preventDefault(); modelInput.value = opts[i]; modelMenu.classList.remove("open"); };
+        });
+        modelMenu.classList.add("open");
+      };
+      modelInput.onfocus = showMenu;
+      modelInput.oninput = showMenu;
+      modelInput.onblur = () => setTimeout(() => modelMenu.classList.remove("open"), 150);
+      const renderModels = (provChanged) => {
         const p = provSel.value;
         const connected = p === "claude" ? true : !!(pcAll[p] && pcAll[p].connected);
         // Can't save an agent onto a provider that isn't connected yet.
         if (saveBtn) { saveBtn.disabled = !connected; saveBtn.title = connected ? "" : tr("⚠ ยังไม่ได้เชื่อมต่อ provider นี้"); }
-        if (!connected) { warn.style.display = "block"; modelSel.style.display = "none"; return; }
-        warn.style.display = "none"; modelSel.style.display = "";
-        // Suggestions: live list (openai-kind, fetched on Connect) or static hints;
-        // the field is a free input so custom/anthropic providers can type any model.
-        const list = (pcAll[p] && pcAll[p].models && pcAll[p].models.length) ? pcAll[p].models : (MODELS[p] || []);
-        const ml = modalCard.querySelector("#eModelList");
-        if (ml) ml.innerHTML = list.filter(Boolean).map((m) => `<option value="${m}"></option>`).join("");
-        modelSel.value = a.model || "";
+        if (!connected) { warn.style.display = "block"; modelWrap.style.display = "none"; return; }
+        warn.style.display = "none"; modelWrap.style.display = "";
+        curModels = (pcAll[p] && pcAll[p].models && pcAll[p].models.length) ? pcAll[p].models : (MODELS[p] || []);
+        // Show the saved model only on the agent's own provider; reset when switching.
+        modelInput.value = provChanged ? "" : ((p === (a.provider || "claude")) ? (a.model || "") : "");
       };
       buildProviderOptions();
-      provSel.onchange = renderModels;
-      renderModels();
-      fetch("/registry").then((x) => x.json()).then((rg) => { pcAll = rg.providerConfig || {}; buildProviderOptions(); renderModels(); }).catch(() => {});
+      provSel.onchange = () => renderModels(true);
+      renderModels(false);
+      fetch("/registry").then((x) => x.json()).then((rg) => { pcAll = rg.providerConfig || {}; buildProviderOptions(); renderModels(false); }).catch(() => {});
     }
       modalCard.querySelector("#ePrompt").value = a.prompt || "";
       modalCard.querySelector("#eExpertise").value = px.expertise || "";
