@@ -78,30 +78,16 @@ const SPLASH_HTML: &str = r#"<!doctype html>
 
 const ORB_HTML: &str = r#"<!doctype html>
 <html><body style="margin:0;overflow:hidden;background:transparent;user-select:none;-webkit-user-select:none;cursor:pointer">
-<div id="base"></div>
-<div id="ring"></div>
 <img id="logo" src="__LOGO__" draggable="false">
 <style>
-  /* Opaque round disc UNDER everything: keeps the "dark coin" look and — crucially on a
-     transparent window — means the ring's transparent conic stops reveal THIS disc, not
-     the window (WebView2 composites transparent-over-transparent as black). Only OUTSIDE
-     this circle is the window transparent, so the edge is a crisp anti-aliased circle. */
-  #base { position:absolute; inset:0; border-radius:50%; background:#0a111d; z-index:0; }
-  /* a quiet living ring: slow drift at rest, eager spin while agents work */
-  #ring { position:absolute; inset:0; border-radius:50%; z-index:1;
-    background: conic-gradient(from 0deg,
-      rgba(94,200,255,0) 0%, rgba(94,200,255,0.9) 22%,
-      rgba(168,130,255,0.55) 38%, rgba(94,200,255,0) 60%);
-    animation: spin 4.5s linear infinite; }
-  #ring::after { content:""; position:absolute; inset:2.5px; border-radius:50%; background:#0a111d; }
-  #logo { position:absolute; left:3.4px; top:3.9px; width:65.8px; height:65.8px;
-    z-index:2; border-radius:50%; animation: breathe 3.4s ease-in-out infinite; }
-  body.busy #ring { animation-duration: 1.1s;
-    background: conic-gradient(from 0deg,
-      rgba(255,176,84,0) 0%, rgba(255,176,84,0.95) 22%,
-      rgba(94,200,255,0.7) 38%, rgba(255,176,84,0) 60%); }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(0.955); } }
+  /* Image-ONLY orb (like the splash). WebView2 composites a raster's baked alpha
+     cleanly on a transparent window, but CSS rounded/conic layers rendered black
+     artifacts here — so the orb is just the (already round) logo. It breathes gently,
+     and breathes faster while the office is working. */
+  #logo { position:absolute; inset:0; width:100%; height:100%;
+    animation: breathe 3.4s ease-in-out infinite; }
+  body.busy #logo { animation-duration: 0.9s; }
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(0.92); } }
 </style>
 <script>
   // Live pulse: the ring knows when the office is actually working.
