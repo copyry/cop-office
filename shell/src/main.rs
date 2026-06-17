@@ -80,7 +80,7 @@ const SPLASH_HTML: &str = r#"<!doctype html>
 const ORB_HTML: &str = r#"<!doctype html>
 <html><body style="margin:0;overflow:hidden;background:#0a111d;user-select:none;-webkit-user-select:none;cursor:pointer">
 <div id="ring"></div>
-<img id="logo" src="http://127.0.0.1:8787/brand/logo_ico_cute.png" draggable="false">
+<img id="logo" src="__LOGO__" draggable="false">
 <style>
   /* a quiet living ring: slow drift at rest, eager spin while agents work */
   #ring { position:absolute; inset:0; border-radius:50%;
@@ -98,21 +98,6 @@ const ORB_HTML: &str = r#"<!doctype html>
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(0.955); } }
 </style>
-<script>
-  // Cold boot: the shell paints the orb BEFORE the daemon's HTTP server is up, so the
-  // logo 404s. A one-shot onerror would leave the orb dark until a manual restart — so
-  // retry until the daemon answers, then drop the dark fallback. (Mirrors wire() below.)
-  (function () {
-    const logo = document.getElementById('logo');
-    const SRC = 'http://127.0.0.1:8787/brand/logo_ico_cute.png';
-    let tries = 0;
-    logo.onerror = function () {
-      document.body.style.background = 'radial-gradient(circle at 32% 28%,#2a78d8,#0b1422)';
-      if (tries++ < 180) setTimeout(() => { logo.src = SRC + '?r=' + tries; }, 1000);
-    };
-    logo.onload = function () { document.body.style.background = '#0a111d'; };
-  })();
-</script>
 <script>
   // Live pulse: the ring knows when the office is actually working.
   let busy = 0;
@@ -158,6 +143,30 @@ const ORB_HTML: &str = r#"<!doctype html>
   });
 </script>
 </body></html>"#;
+
+// The orb's logo is EMBEDDED in the binary as a data: URI rather than fetched from the
+// daemon over HTTP. On a cold boot the shell paints the orb before the daemon's web
+// server is up, so an HTTP <img> would 404 and the orb would sit dark until a manual
+// restart. Baking the bytes in removes that dependency entirely — the orb always shows.
+fn orb_html() -> String {
+    const LOGO: &[u8] = include_bytes!("../../logo_ico_cute.png");
+    ORB_HTML.replace("__LOGO__", &format!("data:image/png;base64,{}", base64_encode(LOGO)))
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let n = ((chunk[0] as u32) << 16)
+            | ((*chunk.get(1).unwrap_or(&0) as u32) << 8)
+            | (*chunk.get(2).unwrap_or(&0) as u32);
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { T[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
 
 // ----------------------------------------------------------- shared orchestration
 fn project_root() -> PathBuf {
@@ -1451,7 +1460,7 @@ fn main() {
     let orb_id = orb.id();
     let p_orb = proxy.clone();
     let _orb_view = WebViewBuilder::new()
-        .with_html(ORB_HTML)
+        .with_html(orb_html())
         .with_ipc_handler(move |req| {
             let _ = match req.body().as_str() {
                 "toggle" => p_orb.send_event(UserEvent::Toggle),

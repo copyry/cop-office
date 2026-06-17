@@ -4,6 +4,16 @@ All notable changes to BagIdea Office. A **release** is a deliberate `VERSION`
 bump on `main` (see [RELEASING.md](RELEASING.md)) — that's what triggers the
 in-app 🔄 update banner. Versions follow [semver](https://semver.org).
 
+## [0.8.2] — Cold-boot dark orb: the real fix
+
+**Fixed**
+- **The chat-head orb's logo is now embedded in the app**, so it always shows. v0.8.1
+  tried to retry the HTTP fetch, but the very first failure on a cold boot could be
+  missed (the image started loading before the retry was wired) and the orb stayed dark
+  even after the daemon was up. The logo no longer touches the network at all — it's
+  baked into the binary as a data URI — so the orb comes up correctly every time,
+  regardless of whether the daemon is ready yet.
+
 ## [0.8.1] — Fix the cold-boot dark orb
 
 **Fixed**
